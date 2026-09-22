@@ -74,3 +74,8 @@ Thumbs.db
 # Explicitly ensure synthetic demonstration datasets remain tracked
 !datasets/
 !datasets/*.csv
+# Exclude large stress test datasets from Git tracking
+*stress*.csv
+datasets/*stress*.csv
+test_*.json
+
