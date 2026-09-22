@@ -34,22 +34,29 @@ export default function App() {
   const [highlightedColumn, setHighlightedColumn] = useState<string | null>(null);
   const [isReportPreviewOpen, setIsReportPreviewOpen] = useState<boolean>(false);
 
-  // Check health on mount
+  // Check health on mount and periodically refresh
   useEffect(() => {
     let mounted = true;
-    getHealth()
-      .then((data) => {
-        if (mounted) setHealth(data);
-      })
-      .catch((err) => {
-        if (mounted) {
-          console.warn('Backend offline or health check failed:', err);
-          setHealth(null);
-        }
-      });
+
+    const performHealthCheck = () => {
+      getHealth()
+        .then((data) => {
+          if (mounted) setHealth(data);
+        })
+        .catch((err) => {
+          if (mounted) {
+            console.warn('Backend offline or health check failed:', err);
+            setHealth(null);
+          }
+        });
+    };
+
+    performHealthCheck();
+    const intervalId = setInterval(performHealthCheck, 15000);
 
     return () => {
       mounted = false;
+      clearInterval(intervalId);
     };
   }, []);
 
