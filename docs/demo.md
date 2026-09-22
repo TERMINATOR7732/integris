@@ -134,3 +134,22 @@ curl -X POST "http://localhost:8000/api/v1/investigate" \
 ```
 
 The response is a deterministic, JSON-serialized `ForensicDossier` contract matching the frontend display.
+
+---
+
+## 5. Live Cloud Production Verification
+
+You can verify the deployed production instances directly over HTTPS:
+
+- **Web Application:** [https://integris-ten.vercel.app](https://integris-ten.vercel.app)
+- **API Health:** `https://integris-api.vercel.app/api/v1/health`
+
+```bash
+# Verify Live Production Health:
+curl -i "https://integris-api.vercel.app/api/v1/health"
+
+# Test Investigation on Production Backend:
+curl -X POST "https://integris-api.vercel.app/api/v1/investigate" \
+  -F "file=@datasets/clean_baseline.csv"
+```
+

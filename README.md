@@ -9,6 +9,12 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6.svg)](https://www.typescriptlang.org/)
 [![Tailwind CSS v4](https://img.shields.io/badge/Tailwind_CSS-v4.0-38B2AC.svg)](https://tailwindcss.com/)
 [![Tests Passing](https://img.shields.io/badge/Tests-100%25_Passing-brightgreen.svg)]()
+[![Live App](https://img.shields.io/badge/Live_App-integris--ten.vercel.app-000000.svg?logo=vercel)](https://integris-ten.vercel.app)
+[![API Status](https://img.shields.io/badge/API-integris--api.vercel.app-009688.svg)](https://integris-api.vercel.app/api/v1/health)
+
+**Live Production Application:** [https://integris-ten.vercel.app](https://integris-ten.vercel.app)  
+**Production Forensic API:** [https://integris-api.vercel.app](https://integris-api.vercel.app) (`/api/v1/health`)  
+**GitHub Repository:** [https://github.com/TERMINATOR7732/integris](https://github.com/TERMINATOR7732/integris)
 
 INTEGRIS is a deterministic data integrity and forensic investigation platform designed to evaluate whether a tabular dataset can reasonably be trusted before it is committed to production analytics, executive decision-making, regulatory reporting, or machine learning pipelines.
 
@@ -173,6 +179,7 @@ INTEGRIS adheres to a strict **ephemeral, zero-retention security model**:
 - **No Database Storage:** INTEGRIS operates without PostgreSQL, SQLite, MongoDB, or Supabase.
 - **No External AI APIs / No LLMs:** Analysis is 100% local, deterministic, and mathematical. No proprietary customer data is ever sent to third-party language models or external cloud APIs.
 - **Zero Telemetry & Tracking:** No analytics scripts, cookies, or remote telemetric beacons are embedded.
+- **Cloud & Local Deployment Privacy Model:** Whether running on cloud serverless infrastructure (Vercel / Render) or locally, the processing lifecycle remains strictly ephemeral. In-flight requests are processed in volatile container memory over TLS and discarded immediately upon response delivery. For air-gapped operations, the platform can be run entirely on isolated localhost environments.
 - **Ethical Screening Disclosure:** Benford's Law and statistical outlier flags are intended as **investigative screening leads**, not definitive proof of fraud, illegality, or malicious activity. Many valid real-world datasets naturally deviate from Benford's Law (e.g. narrow numeric ranges, regulated tariffs, psychological pricing). Contextual verification by qualified analysts is always advised.
 
 ---
@@ -186,7 +193,7 @@ INTEGRIS adheres to a strict **ephemeral, zero-retention security model**:
 
 ### 1. Clone Repository
 ```bash
-git clone https://github.com/your-username/integris.git
+git clone https://github.com/TERMINATOR7732/integris.git
 cd integris
 ```
 
