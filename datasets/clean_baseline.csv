@@ -1,0 +1,51 @@
+employee_id,first_name,last_name,department,job_title,hire_date,exit_date,salary,project_count,performance_rating,is_active,attrition
+EMP-101,Aarav,Sharma,Engineering,Senior Software Engineer,2019-03-15,,115000,8,4.5,True,No
+EMP-102,Diya,Patel,Finance,Senior Financial Analyst,2020-07-01,,98000,5,4.2,True,No
+EMP-103,Rohan,Verma,Operations,Operations Manager,2018-01-10,2023-11-30,105000,11,3.8,False,Yes
+EMP-104,Ananya,Iyer,Marketing,Content Strategist,2021-09-20,,72000,4,4.0,True,No
+EMP-105,Kabir,Mehta,Engineering,DevOps Engineer,2020-02-14,,108000,7,4.6,True,No
+EMP-106,Ishita,Deshmukh,Legal,Compliance Officer,2019-11-05,,92000,3,4.1,True,No
+EMP-107,Vivaan,Joshi,Finance,Accountant,2022-04-18,,68000,4,3.9,True,No
+EMP-108,Saanvi,Nair,Engineering,Backend Developer,2021-06-01,,95000,6,4.3,True,No
+EMP-109,Reyansh,Reddy,Operations,Logistics Coordinator,2020-10-12,2023-08-15,64000,5,3.4,False,Yes
+EMP-110,Tara,Chatterjee,Marketing,SEO Specialist,2022-01-10,,61000,3,3.7,True,No
+EMP-111,Aditya,Bose,Engineering,Frontend Developer,2021-11-15,,89000,5,4.4,True,No
+EMP-112,Meera,Kulkarni,Finance,Financial Analyst,2023-02-01,,75000,3,4.0,True,No
+EMP-113,Arjun,Singh,Operations,Supply Chain Lead,2018-05-22,,112000,9,4.2,True,No
+EMP-114,Riya,Kapoor,Marketing,Brand Specialist,2020-08-17,,78000,6,4.1,True,No
+EMP-115,Dev,Malhotra,Engineering,Cloud Architect,2017-09-01,,145000,12,4.8,True,No
+EMP-116,Kavya,Saxena,Legal,Legal Counsel,2019-04-12,,118000,4,4.5,True,No
+EMP-117,Siddharth,Sen,Finance,Tax Consultant,2021-03-08,,88000,5,4.0,True,No
+EMP-118,Pooja,Rao,Engineering,QA Engineer,2022-07-25,,74000,4,3.8,True,No
+EMP-119,Kunal,Bhatia,Operations,Inventory Associate,2023-05-10,,52000,2,3.5,True,No
+EMP-120,Anika,Chopra,Marketing,Product Marketing Manager,2019-06-18,,102000,7,4.3,True,No
+EMP-121,Vikram,Gupta,Engineering,Software Engineer,2022-09-01,,82000,4,4.1,True,No
+EMP-122,Shreya,Mishra,Finance,Auditor,2020-12-05,,85000,6,4.0,True,No
+EMP-123,Nikhil,Trivedi,Operations,Facilities Lead,2019-08-14,2024-01-31,80000,6,3.6,False,Yes
+EMP-124,Tanvi,Aggarwal,Marketing,Digital Marketing Executive,2021-04-05,,69000,4,3.9,True,No
+EMP-125,Manish,Pandey,Engineering,Data Engineer,2020-03-20,,110000,8,4.6,True,No
+EMP-126,Sneha,Das,Legal,Paralegal,2022-10-15,,58000,3,3.8,True,No
+EMP-127,Gaurav,Jain,Finance,Senior Accountant,2018-11-01,,91000,7,4.2,True,No
+EMP-128,Priya,Nambiar,Engineering,Mobile Developer,2021-08-10,,94000,6,4.3,True,No
+EMP-129,Harsh,Vardhan,Operations,Operations Analyst,2022-02-28,,66000,4,3.7,True,No
+EMP-130,Neha,Bansal,Marketing,PR Manager,2019-10-01,2023-05-31,99000,8,4.1,False,Yes
+EMP-131,Akash,Srivastava,Engineering,Security Engineer,2020-05-15,,118000,7,4.7,True,No
+EMP-132,Simran,Kaur,Finance,Finance Lead,2017-12-01,,135000,10,4.6,True,No
+EMP-133,Rahul,Chauhan,Operations,Warehouse Manager,2019-02-18,,87000,7,4.0,True,No
+EMP-134,Bhavna,Menon,Marketing,Graphic Designer,2021-12-01,,65000,5,3.9,True,No
+EMP-135,Alok,Dubey,Engineering,Full Stack Developer,2021-01-18,,93000,6,4.2,True,No
+EMP-136,Kritika,Roy,Legal,Corporate Secretary,2020-09-10,,96000,4,4.3,True,No
+EMP-137,Varun,Thakur,Finance,Treasury Analyst,2022-06-15,,77000,4,4.0,True,No
+EMP-138,Deepika,Pillai,Engineering,ML Engineer,2020-04-01,,122000,8,4.7,True,No
+EMP-139,Sameer,Sheikh,Operations,Procurement Specialist,2021-05-20,,73000,5,3.8,True,No
+EMP-140,Nandini,Swaminathan,Marketing,Social Media Lead,2022-08-01,,67000,4,4.1,True,No
+EMP-141,Mohit,Soni,Engineering,Site Reliability Engineer,2019-07-15,,114000,8,4.5,True,No
+EMP-142,Swati,Bhatt,Finance,Billing Specialist,2023-01-16,,60000,3,3.7,True,No
+EMP-143,Rajesh,Goyal,Operations,Operations Director,2016-08-01,,160000,14,4.9,True,No
+EMP-144,Ira,Sundaram,Marketing,Copywriter,2022-11-01,,59000,3,3.8,True,No
+EMP-145,Tarun,Mittal,Engineering,Systems Engineer,2020-11-20,,97000,6,4.2,True,No
+EMP-146,Payal,Garg,Legal,Contract Specialist,2021-07-05,,84000,4,4.1,True,No
+EMP-147,Abhinav,Prasad,Finance,Credit Analyst,2022-03-14,,71000,4,3.9,True,No
+EMP-148,Shalini,Verma,Engineering,Engineering Manager,2018-03-01,,152000,11,4.8,True,No
+EMP-149,Chetan,Rathore,Operations,Fleet Supervisor,2021-10-01,2024-02-15,68000,5,3.5,False,Yes
+EMP-150,Juhi,Talwar,Marketing,Event Marketing Lead,2020-01-15,,83000,5,4.0,True,No
