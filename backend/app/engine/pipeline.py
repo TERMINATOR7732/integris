@@ -37,6 +37,11 @@ def run_forensic_pipeline(
     file_name: str = "dataset.csv",
     file_size_bytes: int = 0,
     target_column: str | None = None,
+    file_type: str = "csv",
+    sheet_name: str | None = None,
+    available_sheets: list[str] | None = None,
+    table_index: int | None = None,
+    page_count: int | None = None,
 ) -> ForensicDossier:
     """Execute the end-to-end forensic analysis pipeline on a tabular dataset in-memory.
     
@@ -45,6 +50,11 @@ def run_forensic_pipeline(
         file_name: Client-provided dataset file name.
         file_size_bytes: Uploaded byte size.
         target_column: Optional target feature for machine learning leakage checks.
+        file_type: Ingested file type (csv, tsv, txt, xlsx, xls, pdf).
+        sheet_name: Analyzed sheet name for spreadsheets.
+        available_sheets: All discovered sheets in workbook.
+        table_index: Extracted table index for documents.
+        page_count: Page count for documents.
         
     Returns:
         Strongly typed ForensicDossier model.
@@ -102,6 +112,11 @@ def run_forensic_pipeline(
         analyzed_at=analyzed_timestamp,
         execution_time_ms=execution_duration_ms,
         engine_version="0.1.0",
+        file_type=file_type,
+        sheet_name=sheet_name,
+        available_sheets=available_sheets,
+        table_index=table_index,
+        page_count=page_count,
     )
 
     return ForensicDossier(

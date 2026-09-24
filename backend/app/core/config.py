@@ -25,9 +25,19 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("CORS_ORIGIN_REGEX", r"https://.*\.vercel\.app")
     )
 
-    # Zero-retention upload boundaries (50 MB default)
+    # Zero-retention upload boundaries (50 MB default for CSV/TSV/TXT, 25 MB for Excel, 15 MB for PDF)
     MAX_UPLOAD_SIZE_BYTES: int = 50 * 1024 * 1024
-    ALLOWED_EXTENSIONS: list[str] = [".csv", ".tsv", ".txt"]
+    ALLOWED_EXTENSIONS: list[str] = [".csv", ".tsv", ".txt", ".xlsx", ".xls", ".pdf"]
+    FORMAT_SIZE_LIMITS_BYTES: dict[str, int] = Field(
+        default_factory=lambda: {
+            ".csv": 50 * 1024 * 1024,
+            ".tsv": 50 * 1024 * 1024,
+            ".txt": 50 * 1024 * 1024,
+            ".xlsx": 25 * 1024 * 1024,
+            ".xls": 25 * 1024 * 1024,
+            ".pdf": 15 * 1024 * 1024,
+        }
+    )
 
 
 settings = Settings()

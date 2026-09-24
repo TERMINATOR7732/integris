@@ -34,6 +34,11 @@ export interface InvestigationMetadata {
   analyzed_at: string;
   execution_time_ms: number;
   engine_version: string;
+  file_type?: string;
+  sheet_name?: string | null;
+  available_sheets?: string[] | null;
+  table_index?: number | null;
+  page_count?: number | null;
 }
 
 export interface DatasetSummary {

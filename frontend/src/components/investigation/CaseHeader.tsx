@@ -117,6 +117,58 @@ export function CaseHeader({ metadata, targetColumn, onNewInvestigation, onGener
               <strong>{metadata.row_count.toLocaleString()}</strong> rows × <strong>{metadata.column_count}</strong> cols
             </span>
 
+            {metadata.file_type && (
+              <span
+                className="mono"
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '1px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: '#1e293b',
+                  color: '#38bdf8',
+                  border: '1px solid #334155',
+                }}
+              >
+                .{metadata.file_type.toUpperCase()}
+              </span>
+            )}
+
+            {metadata.sheet_name && (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                  color: '#38bdf8',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  fontSize: '0.75rem',
+                }}
+              >
+                Sheet: <strong>{metadata.sheet_name}</strong>
+              </span>
+            )}
+
+            {metadata.page_count && (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                  border: '1px solid rgba(168, 85, 247, 0.25)',
+                  color: '#c084fc',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  fontSize: '0.75rem',
+                }}
+              >
+                <strong>{metadata.page_count}</strong> {metadata.page_count === 1 ? 'page' : 'pages'}
+              </span>
+            )}
+
             {targetColumn && (
               <span
                 style={{

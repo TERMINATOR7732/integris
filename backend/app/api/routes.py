@@ -1,8 +1,6 @@
 """API route definitions for INTEGRIS."""
 
-import csv
 from datetime import datetime, timezone
-import io
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
@@ -10,6 +8,7 @@ import pandas as pd
 
 from app.core.config import settings
 from app.engine.pipeline import run_forensic_pipeline
+from app.ingestion import ingest_dataset
 from app.models.report import ForensicDossier, HealthResponse
 
 router = APIRouter()
@@ -70,30 +69,17 @@ async def investigate_dataset(
             detail="Uploaded dataset file is completely empty (0 bytes).",
         )
 
-    if file_size > settings.MAX_UPLOAD_SIZE_BYTES:
+    max_bytes = settings.FORMAT_SIZE_LIMITS_BYTES.get(ext, settings.MAX_UPLOAD_SIZE_BYTES)
+    if file_size > max_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Dataset size ({file_size / (1024*1024):.1f} MB) exceeds the maximum allowed limit of {settings.MAX_UPLOAD_SIZE_BYTES / (1024*1024):.0f} MB.",
+            detail=f"Dataset size ({file_size / (1024*1024):.1f} MB) exceeds the maximum allowed limit of {max_bytes / (1024*1024):.0f} MB.",
         )
 
-    # 3. Delimiter Detection & In-Memory Parsing
+    # 3. Delimiter / Document Ingestion & In-Memory Parsing
     try:
-        sample_chunk = content[:4096].decode("utf-8", errors="replace")
-        sniffer = csv.Sniffer()
-        try:
-            detected_dialect = sniffer.sniff(sample_chunk, delimiters=[",", "\t", ";", "|"])
-            delimiter = detected_dialect.delimiter
-        except Exception:
-            delimiter = "\t" if "\t" in sample_chunk.split("\n")[0] else ","
-
-        # Parse CSV into Pandas DataFrame purely in memory
-        df = pd.read_csv(
-            io.BytesIO(content),
-            sep=delimiter,
-            encoding="utf-8",
-            encoding_errors="replace",
-            low_memory=False,
-        )
+        ingestion = ingest_dataset(filename=filename, content=content)
+        df = ingestion.df
     except pd.errors.EmptyDataError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -104,10 +90,15 @@ async def investigate_dataset(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Malformed dataset: Structural delimiter or quote parsing error encountered.",
         )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unable to parse dataset. Ensure the file is a standard delimited tabular file.",
+            detail="Unable to parse dataset. Ensure the file is a standard supported tabular file.",
         )
 
     # 4. Dimension & Target Validation
@@ -138,6 +129,11 @@ async def investigate_dataset(
             file_name=filename,
             file_size_bytes=file_size,
             target_column=target_clean,
+            file_type=ingestion.file_type,
+            sheet_name=ingestion.sheet_name,
+            available_sheets=ingestion.available_sheets,
+            table_index=ingestion.table_index,
+            page_count=ingestion.page_count,
         )
         return dossier
     except Exception as e:

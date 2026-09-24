@@ -17,6 +17,14 @@ interface DatasetUploaderProps {
 }
 
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+const FORMAT_LIMITS: Record<string, number> = {
+  '.csv': 50 * 1024 * 1024,
+  '.tsv': 50 * 1024 * 1024,
+  '.txt': 50 * 1024 * 1024,
+  '.xlsx': 25 * 1024 * 1024,
+  '.xls': 25 * 1024 * 1024,
+  '.pdf': 15 * 1024 * 1024,
+};
 
 export function DatasetUploader({
   onStartInvestigation,
@@ -37,14 +45,15 @@ export function DatasetUploader({
 
     // Validate extension
     const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
-    if (!['.csv', '.tsv', '.txt'].includes(ext)) {
-      setLocalError(`Unsupported file format '${ext}'. Please provide a .csv or .tsv file.`);
+    if (!['.csv', '.tsv', '.txt', '.xlsx', '.xls', '.pdf'].includes(ext)) {
+      setLocalError(`Unsupported file format '${ext}'. Please provide a .csv, .xlsx, .xls, .pdf, or .txt file.`);
       return;
     }
 
-    // Validate size
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      setLocalError(`File size (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds the 50 MB limit.`);
+    // Validate size per format
+    const limitBytes = FORMAT_LIMITS[ext] || MAX_FILE_SIZE_BYTES;
+    if (file.size > limitBytes) {
+      setLocalError(`File size (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds the ${(limitBytes / (1024 * 1024)).toFixed(0)} MB limit for ${ext.toUpperCase()}.`);
       return;
     }
 
@@ -56,7 +65,22 @@ export function DatasetUploader({
     setSelectedFile(file);
     setTargetColumn('');
 
-    // Client-side header and structure inspection
+    // Handle binary formats without text reading
+    if (ext === '.xlsx' || ext === '.xls') {
+      setDetectedFormat(ext === '.xlsx' ? 'Excel Spreadsheet (.xlsx)' : 'Legacy Excel (.xls)');
+      setHeaders([]);
+      setEstimatedRows(null);
+      return;
+    }
+
+    if (ext === '.pdf') {
+      setDetectedFormat('PDF Document (.pdf)');
+      setHeaders([]);
+      setEstimatedRows(null);
+      return;
+    }
+
+    // Client-side header and structure inspection for text files (.csv, .tsv, .txt)
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
@@ -66,8 +90,10 @@ export function DatasetUploader({
       if (lines.length > 0) {
         const firstLine = lines[0];
         const isTab = firstLine.includes('\t') && firstLine.split('\t').length > firstLine.split(',').length;
-        const delim = isTab ? '\t' : ',';
-        setDetectedFormat(isTab ? 'TSV (Tab-separated)' : 'CSV (Comma-separated)');
+        const isPipe = firstLine.includes('|') && firstLine.split('|').length > firstLine.split(',').length;
+        const delim = isTab ? '\t' : (isPipe ? '|' : ',');
+        const fmtName = ext === '.txt' ? 'Delimited Text (.txt)' : (isTab ? 'TSV (Tab-separated)' : 'CSV (Comma-separated)');
+        setDetectedFormat(fmtName);
 
         // Extract clean headers
         const parsedHeaders = firstLine
@@ -220,7 +246,7 @@ export function DatasetUploader({
           <input
             ref={inputRef}
             type="file"
-            accept=".csv,.tsv,.txt"
+            accept=".csv,.tsv,.txt,.xlsx,.xls,.pdf"
             onChange={handleChange}
             style={{ display: 'none' }}
           />
@@ -247,7 +273,7 @@ export function DatasetUploader({
           </div>
 
           <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1.5rem' }}>
-            Supported formats: <span className="mono" style={{ color: '#94a3b8' }}>.CSV, .TSV</span> • Max size: <span className="mono" style={{ color: '#94a3b8' }}>50 MB</span>
+            Supported formats: <span className="mono" style={{ color: '#94a3b8' }}>.CSV, .TSV, .XLSX, .XLS, .PDF, .TXT</span> • Max size: <span className="mono" style={{ color: '#94a3b8' }}>50 MB</span> (Excel <span className="mono" style={{ color: '#94a3b8' }}>25 MB</span>, PDF <span className="mono" style={{ color: '#94a3b8' }}>15 MB</span>)
           </p>
 
           <div

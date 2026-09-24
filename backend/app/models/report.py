@@ -64,6 +64,11 @@ class InvestigationMetadata(BaseModel):
     analyzed_at: str = Field(description="ISO 8601 UTC timestamp of the investigation")
     execution_time_ms: float = Field(ge=0.0, description="Forensic pipeline runtime in milliseconds")
     engine_version: str = Field(default="0.1.0", description="Version of the INTEGRIS forensic engine")
+    file_type: str = Field(default="csv", description="Ingested file format extension/type")
+    sheet_name: str | None = Field(default=None, description="Analyzed spreadsheet sheet name if applicable")
+    available_sheets: list[str] | None = Field(default=None, description="All sheet names found in workbook")
+    table_index: int | None = Field(default=None, description="Table index extracted from document")
+    page_count: int | None = Field(default=None, description="Total page count if document format")
 
 
 class DatasetSummary(BaseModel):
