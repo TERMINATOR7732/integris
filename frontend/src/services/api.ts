@@ -9,36 +9,86 @@ import type {
   InvestigateOptions,
 } from '../types/integris';
 
+/**
+ * Normalizes an API endpoint URL by stripping trailing slashes and ensuring '/api/v1' suffix.
+ */
+function normalizeApiUrl(raw?: string): string | null {
+  if (!raw || !raw.trim()) return null;
+  const clean = raw.trim().replace(/\/+$/, '');
+  return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
+}
+
 export function getApiBaseUrl(): string {
   if (typeof window !== 'undefined') {
     // 1. URL search parameter override (e.g., ?api=http://localhost:8000)
     const urlParams = new URLSearchParams(window.location.search);
-    const apiParam = urlParams.get('api')?.trim();
+    const apiParam = normalizeApiUrl(urlParams.get('api') || undefined);
     if (apiParam) {
-      const clean = apiParam.replace(/\/+$/, '');
-      return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
+      return apiParam;
     }
 
     // 2. Local storage override (if user specified custom endpoint)
-    const storedApi = localStorage.getItem('INTEGRIS_API_BASE')?.trim();
+    const storedApi = localStorage.getItem('INTEGRIS_API_BASE');
     if (storedApi) {
       // If browsing on a remote domain (e.g., Vercel), do not let a stale localhost override break requests
       const isRemoteHost = !window.location.hostname.includes('localhost') && window.location.hostname !== '127.0.0.1';
       const isStoredLocal = storedApi.includes('localhost') || storedApi.includes('127.0.0.1');
       if (!isRemoteHost || !isStoredLocal) {
-        const clean = storedApi.replace(/\/+$/, '');
-        return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
+        const clean = normalizeApiUrl(storedApi);
+        if (clean) return clean;
       }
     }
   }
 
-  // 3. Vite environment variable (default build target)
-  const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
-  if (rawBaseUrl) {
-    const clean = rawBaseUrl.replace(/\/+$/, '');
-    return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
+  // 3. Primary backend endpoint (e.g. Google Cloud Run when configured)
+  const primaryUrl = normalizeApiUrl(import.meta.env.VITE_API_PRIMARY_URL as string | undefined);
+  if (primaryUrl) {
+    return primaryUrl;
   }
+
+  // 4. Default / existing single base URL (preserves exact backward compatibility with VITE_API_BASE_URL)
+  const defaultBaseUrl = normalizeApiUrl(import.meta.env.VITE_API_BASE_URL as string | undefined);
+  if (defaultBaseUrl) {
+    return defaultBaseUrl;
+  }
+
+  // 5. Secondary / backup backend endpoint (e.g. Render fallback)
+  const backupUrl = normalizeApiUrl(import.meta.env.VITE_API_BACKUP_URL as string | undefined);
+  if (backupUrl) {
+    return backupUrl;
+  }
+
+  // 6. Same-origin fallback
   return '/api/v1';
+}
+
+/**
+ * In-memory active API endpoint selected by the health-checking probe.
+ * Defaults to null until a health check establishes connection.
+ */
+let activeTargetUrl: string | null = null;
+
+export function getActiveApiBaseUrl(): string {
+  return activeTargetUrl || getApiBaseUrl();
+}
+
+/**
+ * Returns configuration metadata describing configured endpoints.
+ */
+export function getApiEndpointConfig(): {
+  primary: string | null;
+  backup: string | null;
+  active: string;
+} {
+  const primary = normalizeApiUrl(import.meta.env.VITE_API_PRIMARY_URL as string | undefined);
+  const backup =
+    normalizeApiUrl(import.meta.env.VITE_API_BACKUP_URL as string | undefined) ||
+    normalizeApiUrl(import.meta.env.VITE_API_BASE_URL as string | undefined);
+  return {
+    primary,
+    backup,
+    active: getActiveApiBaseUrl(),
+  };
 }
 
 export class IntegrisApiError extends Error {
@@ -53,16 +103,19 @@ export class IntegrisApiError extends Error {
 }
 
 /**
- * Check backend engine health and readiness.
+ * Probes a specific base URL's health endpoint with an abort timeout.
  */
-export async function getHealth(): Promise<HealthResponse> {
-  const apiBase = getApiBaseUrl();
+async function probeHealthEndpoint(baseUrl: string, timeoutMs: number = 5000): Promise<HealthResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    const response = await fetch(`${apiBase}/health`, {
+    const response = await fetch(`${baseUrl}/health`, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
       },
+      signal: controller.signal,
     });
 
     if (!response.ok) {
@@ -94,11 +147,64 @@ export async function getHealth(): Promise<HealthResponse> {
         error,
       );
     }
+    const isAbort = error instanceof DOMException && error.name === 'AbortError';
     throw new IntegrisApiError(
-      `Unable to connect to INTEGRIS Forensic Engine at ${apiBase}/health. Ensure backend is running.`,
+      isAbort
+        ? `Health check timed out after ${timeoutMs}ms at ${baseUrl}/health.`
+        : `Unable to connect to INTEGRIS Forensic Engine at ${baseUrl}/health.`,
       0,
       error,
     );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Check backend engine health and readiness.
+ *
+ * When both primary (e.g. Cloud Run) and backup (e.g. Render) endpoints are
+ * configured, tests primary first. If primary is unavailable, seamlessly
+ * falls back to secondary for subsequent operations.
+ */
+export async function getHealth(): Promise<HealthResponse> {
+  const primaryUrl = normalizeApiUrl(import.meta.env.VITE_API_PRIMARY_URL as string | undefined);
+  const backupUrl = normalizeApiUrl(import.meta.env.VITE_API_BACKUP_URL as string | undefined);
+  const staticUrl = getApiBaseUrl();
+
+  const hasExplicitParam =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).has('api');
+
+  // If debugging with explicit ?api= or if primary/backup pair is not configured, probe directly
+  if (hasExplicitParam || !primaryUrl || !backupUrl || primaryUrl === backupUrl) {
+    const data = await probeHealthEndpoint(staticUrl);
+    activeTargetUrl = staticUrl;
+    return data;
+  }
+
+  // Multi-target architecture: probe primary first
+  try {
+    const primaryData = await probeHealthEndpoint(primaryUrl, 4000);
+    activeTargetUrl = primaryUrl;
+    return primaryData;
+  } catch (primaryError) {
+    console.warn(
+      `Primary forensic backend (${primaryUrl}) unavailable. Probing backup (${backupUrl})...`,
+      primaryError,
+    );
+    try {
+      const backupData = await probeHealthEndpoint(backupUrl, 5000);
+      activeTargetUrl = backupUrl;
+      return backupData;
+    } catch (backupError) {
+      activeTargetUrl = null;
+      throw new IntegrisApiError(
+        `Both primary (${primaryUrl}) and backup (${backupUrl}) forensic backends are unreachable.`,
+        0,
+        { primaryError, backupError },
+      );
+    }
   }
 }
 
@@ -109,7 +215,7 @@ export async function investigateDataset(
   file: File,
   options?: InvestigateOptions,
 ): Promise<ForensicDossier> {
-  const apiBase = getApiBaseUrl();
+  const apiBase = getActiveApiBaseUrl();
   const formData = new FormData();
   formData.append('file', file);
 
