@@ -15,21 +15,25 @@ export function getApiBaseUrl(): string {
     const urlParams = new URLSearchParams(window.location.search);
     const apiParam = urlParams.get('api')?.trim();
     if (apiParam) {
-      return `${apiParam.replace(/\/+$/, '')}/api/v1`;
+      const clean = apiParam.replace(/\/+$/, '');
+      return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
     }
 
     // 2. Local storage override (if user specified custom endpoint)
     const storedApi = localStorage.getItem('INTEGRIS_API_BASE')?.trim();
     if (storedApi) {
-      return `${storedApi.replace(/\/+$/, '')}/api/v1`;
+      const clean = storedApi.replace(/\/+$/, '');
+      return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
     }
   }
 
   // 3. Vite environment variable (default build target)
   const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
-  return rawBaseUrl
-    ? `${rawBaseUrl.replace(/\/+$/, '')}/api/v1`
-    : '/api/v1';
+  if (rawBaseUrl) {
+    const clean = rawBaseUrl.replace(/\/+$/, '');
+    return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
+  }
+  return '/api/v1';
 }
 
 export class IntegrisApiError extends Error {
