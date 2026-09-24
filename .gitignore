@@ -79,3 +79,5 @@ Thumbs.db
 datasets/*stress*.csv
 test_*.json
 
+
+.vercel
