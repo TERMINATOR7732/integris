@@ -22,8 +22,13 @@ export function getApiBaseUrl(): string {
     // 2. Local storage override (if user specified custom endpoint)
     const storedApi = localStorage.getItem('INTEGRIS_API_BASE')?.trim();
     if (storedApi) {
-      const clean = storedApi.replace(/\/+$/, '');
-      return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
+      // If browsing on a remote domain (e.g., Vercel), do not let a stale localhost override break requests
+      const isRemoteHost = !window.location.hostname.includes('localhost') && window.location.hostname !== '127.0.0.1';
+      const isStoredLocal = storedApi.includes('localhost') || storedApi.includes('127.0.0.1');
+      if (!isRemoteHost || !isStoredLocal) {
+        const clean = storedApi.replace(/\/+$/, '');
+        return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
+      }
     }
   }
 
@@ -81,6 +86,13 @@ export async function getHealth(): Promise<HealthResponse> {
   } catch (error) {
     if (error instanceof IntegrisApiError) {
       throw error;
+    }
+    if (error instanceof SyntaxError) {
+      throw new IntegrisApiError(
+        'Health endpoint returned an invalid or non-JSON response.',
+        502,
+        error,
+      );
     }
     throw new IntegrisApiError(
       `Unable to connect to INTEGRIS Forensic Engine at ${apiBase}/health. Ensure backend is running.`,
@@ -147,12 +159,18 @@ export async function investigateDataset(
       throw error;
     }
 
+    if (error instanceof SyntaxError) {
+      throw new IntegrisApiError(
+        'Server returned an invalid or malformed response during forensic investigation. Check backend service status.',
+        502,
+        error,
+      );
+    }
+
     // Diagnostic check for serverless payload boundary
     const isServerlessHost =
-      apiBase.includes('vercel.app') ||
-      (!apiBase.includes('localhost') &&
-        !apiBase.includes('127.0.0.1') &&
-        !apiBase.startsWith('/'));
+      apiBase.includes('vercel.app') &&
+      !apiBase.includes('onrender.com');
 
     if (file.size > 4.5 * 1024 * 1024 && isServerlessHost) {
       const mbSize = (file.size / (1024 * 1024)).toFixed(1);

@@ -4,9 +4,10 @@ Defines schemas for investigation metadata, dataset profiling, forensic findings
 quantified evidence chains, Trust Score attribution, and the complete Forensic Dossier.
 """
 
+import math
 from enum import Enum
 from typing import Any
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Severity(str, Enum):
@@ -106,6 +107,28 @@ class ColumnProfile(BaseModel):
     is_candidate_identifier: bool = Field(default=False, description="Whether column appears to be a unique identifier")
     is_constant_or_near_constant: bool = Field(default=False, description="Whether column has zero or near-zero variance")
 
+    @field_validator("min_value", "max_value", "mean", "median", "std_dev", "null_ratio", "unique_ratio", mode="before")
+    @classmethod
+    def _sanitize_numeric_fields(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        return v
+
+    @field_validator("sample_values", mode="before")
+    @classmethod
+    def _sanitize_sample_values(cls, values: list[Any]) -> list[Any]:
+        if not values:
+            return []
+        cleaned = []
+        for val in values:
+            if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+                cleaned.append(None)
+            else:
+                cleaned.append(val)
+        return cleaned
+
 
 class Evidence(BaseModel):
     """Mathematical or structural proof supporting a forensic finding."""
@@ -116,6 +139,30 @@ class Evidence(BaseModel):
     sample_row_indices: list[int] = Field(default_factory=list, description="Sample row coordinates exhibiting the issue")
     sample_values: list[Any] = Field(default_factory=list, description="Extracted sample values demonstrating the finding")
     details: str | None = Field(default=None, description="Technical narrative detailing mathematical proof")
+
+    @field_validator("observed_value", "threshold_or_expected", mode="before")
+    @classmethod
+    def _sanitize_evidence_scalars(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        if isinstance(v, list):
+            return [None if (isinstance(item, float) and (math.isnan(item) or math.isinf(item))) else item for item in v]
+        return v
+
+    @field_validator("sample_values", mode="before")
+    @classmethod
+    def _sanitize_evidence_samples(cls, values: list[Any]) -> list[Any]:
+        if not values:
+            return []
+        cleaned = []
+        for val in values:
+            if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+                cleaned.append(None)
+            else:
+                cleaned.append(val)
+        return cleaned
 
 
 class Recommendation(BaseModel):

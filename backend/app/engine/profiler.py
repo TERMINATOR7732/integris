@@ -9,26 +9,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from app.engine.sanitizer import sanitize_scalar
 from app.models.report import ColumnProfile, DatasetSummary, SemanticType
 
 
 def _sanitize_scalar(val: Any) -> Any:
     """Convert numpy/pandas scalars to native JSON-serializable Python types."""
-    if pd.isna(val):
-        return None
-    if isinstance(val, (np.integer, int)):
-        return int(val)
-    if isinstance(val, (np.floating, float)):
-        if math.isnan(val) or math.isinf(val):
-            return None
-        return round(float(val), 4)
-    if isinstance(val, (np.bool_, bool)):
-        return bool(val)
-    # Sanitize spreadsheet formula injection tokens for display safety
-    str_val = str(val)
-    if str_val.startswith(("=", "+", "-", "@", "\t", "\r")):
-        return f"'{str_val}"
-    return str_val
+    return sanitize_scalar(val)
 
 
 def _infer_semantic_type(series: pd.Series, col_name: str, total_rows: int) -> SemanticType:
@@ -142,16 +129,19 @@ def profile_dataset(df: pd.DataFrame) -> tuple[DatasetSummary, list[ColumnProfil
 
         if pd.api.types.is_numeric_dtype(series) and non_null_count > 0:
             numeric_valid = series.dropna()
+            numeric_finite = numeric_valid[np.isfinite(numeric_valid)]
+            finite_count = len(numeric_finite)
             try:
-                min_val = _sanitize_scalar(numeric_valid.min())
-                max_val = _sanitize_scalar(numeric_valid.max())
-                mean_calc = numeric_valid.mean()
-                mean_val = round(float(mean_calc), 4) if not (math.isnan(mean_calc) or math.isinf(mean_calc)) else None
-                median_calc = numeric_valid.median()
-                median_val = round(float(median_calc), 4) if not (math.isnan(median_calc) or math.isinf(median_calc)) else None
-                if non_null_count > 1:
-                    std_calc = numeric_valid.std()
-                    std_val = round(float(std_calc), 4) if not (math.isnan(std_calc) or math.isinf(std_calc)) else None
+                min_val = _sanitize_scalar(numeric_finite.min()) if finite_count > 0 else None
+                max_val = _sanitize_scalar(numeric_finite.max()) if finite_count > 0 else None
+                if finite_count > 0:
+                    mean_calc = numeric_finite.mean()
+                    mean_val = round(float(mean_calc), 4) if math.isfinite(mean_calc) else None
+                    median_calc = numeric_finite.median()
+                    median_val = round(float(median_calc), 4) if math.isfinite(median_calc) else None
+                    if finite_count > 1:
+                        std_calc = numeric_finite.std()
+                        std_val = round(float(std_calc), 4) if math.isfinite(std_calc) else None
             except Exception:
                 pass
 

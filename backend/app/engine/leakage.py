@@ -4,6 +4,7 @@ Detects statistical proxies, extreme target associations, near-duplicate target
 encodings, and feature-target causality anomalies.
 """
 
+import math
 from typing import Any
 import numpy as np
 import pandas as pd
@@ -100,12 +101,19 @@ def analyze_leakage(
             valid_num = df[[col, target_column]].dropna()
             if len(valid_num) >= 10:
                 try:
-                    r_pearson, _ = stats.pearsonr(valid_num[col], valid_num[target_column])
-                    r_spearman, _ = stats.spearmanr(valid_num[col], valid_num[target_column])
-                    max_corr = max(abs(r_pearson), abs(r_spearman))
+                    r_p_calc, _ = stats.pearsonr(valid_num[col], valid_num[target_column])
+                    r_s_calc, _ = stats.spearmanr(valid_num[col], valid_num[target_column])
+                    r_pearson = float(r_p_calc) if math.isfinite(r_p_calc) else None
+                    r_spearman = float(r_s_calc) if math.isfinite(r_s_calc) else None
+                    corrs = [abs(c) for c in (r_pearson, r_spearman) if c is not None]
+                    max_corr = max(corrs) if corrs else None
 
-                    if max_corr >= 0.95 and not is_id:
+                    if max_corr is not None and max_corr >= 0.95 and not is_id:
                         severity = Severity.CRITICAL if max_corr >= 0.98 else Severity.HIGH
+                        p_str = f"{r_pearson:.3f}" if r_pearson is not None else "N/A"
+                        s_str = f"{r_spearman:.3f}" if r_spearman is not None else "N/A"
+                        p_detail = f"{r_pearson:.4f}" if r_pearson is not None else "N/A"
+                        s_detail = f"{r_spearman:.4f}" if r_spearman is not None else "N/A"
                         findings.append(
                             Finding(
                                 id=f"FND-LKG-CORR-{col_str}",
@@ -114,7 +122,7 @@ def analyze_leakage(
                                 title=f"Potential target leakage indicator: Extreme correlation with target in '{col_str}' (r = {max_corr:.3f})",
                                 description=(
                                     f"Column '{col_str}' exhibits an extraordinarily high statistical association with target "
-                                    f"'{target_column}' (Pearson: {r_pearson:.3f}, Spearman: {r_spearman:.3f}). "
+                                    f"'{target_column}' (Pearson: {p_str}, Spearman: {s_str}). "
                                     f"While strong signals exist naturally, near-perfect linear relationships often indicate "
                                     f"reverse causality or post-outcome feature capture."
                                 ),
@@ -128,7 +136,7 @@ def analyze_leakage(
                                         threshold_or_expected="< 0.95",
                                         sample_row_indices=[],
                                         sample_values=[],
-                                        details=f"Pearson r={r_pearson:.4f}, Spearman r={r_spearman:.4f}.",
+                                        details=f"Pearson r={p_detail}, Spearman r={s_detail}.",
                                     )
                                 ],
                                 recommendations=[
@@ -152,7 +160,7 @@ def analyze_leakage(
                     crosstab = pd.crosstab(valid_cat[col], valid_cat[target_column])
                     if crosstab.shape[0] > 1 and crosstab.shape[1] > 1:
                         cramer_v = float(stats.contingency.association(crosstab.values, method="cramer"))
-                        if cramer_v >= 0.95:
+                        if math.isfinite(cramer_v) and cramer_v >= 0.95:
                             findings.append(
                                 Finding(
                                     id=f"FND-LKG-CRAMER-{col_str}",

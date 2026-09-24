@@ -1,13 +1,15 @@
 """API route definitions for INTEGRIS."""
 
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import JSONResponse
 import pandas as pd
 
 from app.core.config import settings
 from app.engine.pipeline import run_forensic_pipeline
+from app.engine.sanitizer import sanitize_for_json
 from app.ingestion import ingest_dataset
 from app.models.report import ForensicDossier, HealthResponse
 
@@ -135,7 +137,10 @@ async def investigate_dataset(
             table_index=ingestion.table_index,
             page_count=ingestion.page_count,
         )
-        return dossier
+        sanitized = sanitize_for_json(dossier.model_dump(mode="json"))
+        return JSONResponse(status_code=status.HTTP_200_OK, content=sanitized)
+    except HTTPException:
+        raise
     except Exception as e:
         # Prevent stack trace leakage to client
         raise HTTPException(

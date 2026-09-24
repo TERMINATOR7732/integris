@@ -4,6 +4,7 @@ Detects cross-column logical contradictions, temporal inversions,
 impossible numeric bounds, and semantic state conflicts.
 """
 
+import math
 from typing import Any
 import pandas as pd
 
@@ -136,7 +137,7 @@ def analyze_consistency(
             if neg_count > 0:
                 neg_ratio = neg_count / total_rows
                 neg_indices = df.index[neg_mask].tolist()
-                sample_negs = series[neg_mask].unique().tolist()[:5]
+                sample_negs = [round(float(v), 4) for v in series[neg_mask].unique().tolist()[:5] if pd.notna(v) and math.isfinite(v)]
 
                 findings.append(
                     Finding(

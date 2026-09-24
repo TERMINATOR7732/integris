@@ -75,32 +75,38 @@ def analyze_distribution(
         if n < 8:
             continue
 
-        # Convert to float array for numerical stability
+        # Convert to float array and filter to strictly finite numbers for statistical analysis
         vals = clean_series.to_numpy(dtype=float)
-        unique_vals = np.unique(vals)
+        vals_finite = vals[np.isfinite(vals)]
+        n_finite = len(vals_finite)
+        if n_finite < 8:
+            continue
+
+        unique_vals = np.unique(vals_finite)
         if len(unique_vals) <= 2:
             continue
 
         # 1. Extreme Outlier Detection (Tukey 3x IQR & Modified Z-Score)
-        q25 = float(np.percentile(vals, 25))
-        q75 = float(np.percentile(vals, 75))
+        q25 = float(np.percentile(vals_finite, 25))
+        q75 = float(np.percentile(vals_finite, 75))
         iqr = q75 - q25
-        median = float(np.median(vals))
-        mad = float(np.median(np.abs(vals - median)))
+        median = float(np.median(vals_finite))
+        mad = float(np.median(np.abs(vals_finite - median)))
 
         extreme_upper_bound = q75 + (3.0 * iqr) if iqr > 0 else median + (5.0 * mad if mad > 0 else 1.0)
         extreme_lower_bound = q25 - (3.0 * iqr) if iqr > 0 else median - (5.0 * mad if mad > 0 else 1.0)
 
-        # Identify extreme outlier mask
-        extreme_mask = (vals > extreme_upper_bound) | (vals < extreme_lower_bound)
+        # Identify extreme outlier mask on finite values
+        extreme_mask = (vals_finite > extreme_upper_bound) | (vals_finite < extreme_lower_bound)
         extreme_count = int(np.sum(extreme_mask))
 
-        if extreme_count > 0 and ((extreme_count / n) <= 0.10 or extreme_count <= 2):
+        if extreme_count > 0 and ((extreme_count / n_finite) <= 0.10 or extreme_count <= 2):
             # Significant isolated extreme outliers
-            outlier_indices = clean_series.index[extreme_mask].tolist()
-            outlier_values = [round(float(v), 4) for v in vals[extreme_mask][:5]]
-            max_val = float(np.max(vals))
-            min_val = float(np.min(vals))
+            finite_series = clean_series[clean_series.isin(vals_finite)]
+            outlier_indices = finite_series.index[extreme_mask].tolist() if len(finite_series) == len(extreme_mask) else clean_series.head(extreme_count).index.tolist()
+            outlier_values = [round(float(v), 4) for v in vals_finite[extreme_mask][:5] if math.isfinite(v)]
+            max_val = float(np.max(vals_finite))
+            min_val = float(np.min(vals_finite))
 
             # Gauge extremity: is the max value > 10x the median or IQR?
             distance_ratio = (max_val - q75) / iqr if iqr > 0 else 0
@@ -143,9 +149,12 @@ def analyze_distribution(
 
         # 2. Distribution Shape: Extreme Skewness / Kurtosis
         try:
-            skew_val = float(stats.skew(vals))
-            kurt_val = float(stats.kurtosis(vals))
-            if abs(skew_val) > 4.0 and extreme_count == 0:
+            skew_calc = stats.skew(vals_finite)
+            kurt_calc = stats.kurtosis(vals_finite)
+            skew_val = float(skew_calc) if math.isfinite(skew_calc) else None
+            kurt_val = float(kurt_calc) if math.isfinite(kurt_calc) else None
+            if skew_val is not None and abs(skew_val) > 4.0 and extreme_count == 0:
+                kurt_str = f"{kurt_val:.2f}" if kurt_val is not None else "N/A"
                 findings.append(
                     Finding(
                         id=f"FND-DST-SKEW-{col_str}",
@@ -153,7 +162,7 @@ def analyze_distribution(
                         severity=Severity.LOW,
                         title=f"Substantial distributional asymmetry in '{col_str}' (skewness: {skew_val:.2f})",
                         description=(
-                            f"Column '{col_str}' has high skewness ({skew_val:.2f}) and kurtosis ({kurt_val:.2f}), "
+                            f"Column '{col_str}' has high skewness ({skew_val:.2f}) and kurtosis ({kurt_str}), "
                             f"indicating a heavily asymmetric or heavy-tailed distribution."
                         ),
                         affected_columns=[col_str],
@@ -166,7 +175,7 @@ def analyze_distribution(
                                 threshold_or_expected="[-2.0, 2.0] for symmetric distributions",
                                 sample_row_indices=[],
                                 sample_values=[],
-                                details=f"Kurtosis={kurt_val:.2f}.",
+                                details=f"Kurtosis={kurt_str}.",
                             )
                         ],
                         recommendations=[
@@ -185,15 +194,17 @@ def analyze_distribution(
         # 3. Benford's Law Conformity Analysis (Investigative Signal)
         # Suitability criteria:
         # - Strictly positive numbers
-        # - Sufficient sample size (>= 50)
+        # - Sufficient sample size (>= 40)
         # - Span at least 2 orders of magnitude (max / min >= 50)
         # - Not an artificial ID, counter, or percentage
         is_id = profile.is_candidate_identifier if profile else False
         col_lower = col_str.lower()
         is_financial = any(k in col_lower for k in ["salary", "revenue", "amount", "cost", "price", "sales", "transaction", "payment", "expense", "balance"])
-        span_ratio = float(np.max(vals) / (np.min(vals) + 1e-9))
-        if (n >= 40 and np.all(vals > 0) and not is_id and is_financial and span_ratio >= 50):
-            leading_digits = [_extract_leading_digit(v) for v in vals]
+        min_finite = float(np.min(vals_finite))
+        max_finite = float(np.max(vals_finite))
+        span_ratio = max_finite / (min_finite + 1e-9) if min_finite > 0 else 0.0
+        if (n_finite >= 40 and np.all(vals_finite > 0) and not is_id and is_financial and span_ratio >= 50):
+            leading_digits = [_extract_leading_digit(v) for v in vals_finite]
             valid_digits = [d for d in leading_digits if d is not None]
 
             if len(valid_digits) >= 40:
@@ -204,10 +215,11 @@ def analyze_distribution(
                 observed_probs = {d: digit_counts[d] / total_digits for d in range(1, 10)}
 
                 # Mean Absolute Deviation (MAD) against theoretical Benford
-                mad_benford = float(np.mean([abs(observed_probs[d] - BENFORD_EXPECTED[d]) for d in range(1, 10)]))
+                mad_calc = np.mean([abs(observed_probs[d] - BENFORD_EXPECTED[d]) for d in range(1, 10)])
+                mad_benford = float(mad_calc) if math.isfinite(mad_calc) else None
 
                 # Conformity threshold: MAD > 0.025 indicates substantial non-conformity on eligible data
-                if mad_benford > 0.025:
+                if mad_benford is not None and mad_benford > 0.025:
                     findings.append(
                         Finding(
                             id=f"FND-DST-BENFORD-{col_str}",
