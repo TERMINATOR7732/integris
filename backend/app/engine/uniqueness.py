@@ -100,7 +100,10 @@ def analyze_uniqueness(
 
         sample_rows_preview = []
         for idx in affected_indices[:3]:
-            row_dict = {str(k): str(v)[:40] for k, v in df.loc[idx].to_dict().items()}
+            row_dict = {
+                str(k): str(v)[:40]
+                for k, v in list(df.loc[idx].to_dict().items())[:25]
+            }
             sample_rows_preview.append(row_dict)
 
         findings.append(
@@ -113,7 +116,7 @@ def analyze_uniqueness(
                     f"The dataset contains {dup_rows_count} redundant duplicate records across all columns. "
                     f"Duplication skews aggregate statistics, produces false variance deflation, and risks double-counting in business reports."
                 ),
-                affected_columns=list(df.columns.astype(str)),
+                affected_columns=[str(c) for c in list(df.columns)[:50]],
                 affected_row_count=dup_rows_count,
                 affected_row_ratio=round(dup_ratio, 4),
                 evidence=[

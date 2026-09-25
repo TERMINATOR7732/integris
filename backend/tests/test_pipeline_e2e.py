@@ -207,3 +207,87 @@ def test_pipeline_deterministic_repeatability() -> None:
         assert [f.evidence[0].sample_row_indices for f in r.findings] == [
             f.evidence[0].sample_row_indices for f in baseline.findings
         ]
+
+
+def test_api_root_and_health_contracts() -> None:
+    """Verify GET / and GET /api/v1/health return expected status codes and contracts."""
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+    root_json = root_resp.json()
+    assert root_json["platform"] == "INTEGRIS"
+    assert root_json["health"] == "/api/v1/health"
+    assert "version" in root_json
+
+    health_resp = client.get("/api/v1/health")
+    assert health_resp.status_code == 200
+    health_json = health_resp.json()
+    assert health_json["status"] == "healthy"
+    assert health_json["engine_status"] == "ready"
+    assert "timestamp" in health_json
+
+
+def test_api_investigate_missing_file_returns_422() -> None:
+    """Submitting POST /api/v1/investigate without a file field must return HTTP 422."""
+    resp = client.post("/api/v1/investigate", data={"target_column": "attrition"})
+    assert resp.status_code == 422
+
+
+def test_api_wide_dataset_bounds_duplicate_preview_and_422_columns(monkeypatch) -> None:
+    """Verify wide datasets bound duplicate row preview dicts, affected_columns, and 422 column error lists."""
+    import app.api.routes as routes_mod
+
+    cols = [f"col_{i}" for i in range(60)]
+    row_vals = [str(i) for i in range(60)]
+    csv_lines = [",".join(cols), ",".join(row_vals), ",".join(row_vals), ",".join([str(i + 1) for i in range(60)])]
+    csv_bytes = "\n".join(csv_lines).encode("utf-8")
+
+    # 1. Invalid target_column on 60-column dataset bounds the column preview to 20 columns
+    resp_422 = client.post(
+        "/api/v1/investigate",
+        files={"file": ("wide.csv", csv_bytes, "text/csv")},
+        data={"target_column": "missing_target"},
+    )
+    assert resp_422.status_code == 422
+    detail_422 = resp_422.json()["detail"]
+    assert "does not exist" in detail_422
+    assert "(and 40 more)" in detail_422
+    assert "col_59" not in detail_422
+
+    # 2. Valid investigation on 60-column dataset bounds duplicate preview keys to 25 and affected_columns to 50
+    resp_200 = client.post(
+        "/api/v1/investigate",
+        files={"file": ("wide.csv", csv_bytes, "text/csv")},
+    )
+    assert resp_200.status_code == 200
+    dossier = ForensicDossier.model_validate(resp_200.json())
+    dup_fnd = next(f for f in dossier.findings if f.id == "FND-UNQ-EXACT-DUPS")
+    assert len(dup_fnd.affected_columns) == 50
+    assert len(dup_fnd.evidence[0].sample_values[0]) == 25
+
+    # 3. Exceeding MAX_DATASET_COLUMNS returns HTTP 413
+    monkeypatch.setattr(routes_mod, "MAX_DATASET_COLUMNS", 30)
+    resp_413 = client.post(
+        "/api/v1/investigate",
+        files={"file": ("wide.csv", csv_bytes, "text/csv")},
+    )
+    assert resp_413.status_code == 413
+    assert "exceeds the maximum processing limit of 30 columns" in resp_413.json()["detail"]
+
+
+def test_api_internal_error_does_not_leak_exception_details(monkeypatch) -> None:
+    """Ensure unexpected pipeline exceptions return HTTP 500 without leaking sensitive exception messages."""
+    import app.api.routes as routes_mod
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("Sensitive internal path /var/secrets/db.key failed")
+
+    monkeypatch.setattr(routes_mod, "run_forensic_pipeline", _boom)
+    resp = client.post(
+        "/api/v1/investigate",
+        files={"file": ("small.csv", b"a,b\n1,2\n3,4", "text/csv")},
+    )
+    assert resp.status_code == 500
+    detail = resp.json()["detail"]
+    assert "/var/secrets" not in detail
+    assert "db.key" not in detail
+    assert "internal error" in detail

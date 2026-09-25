@@ -15,6 +15,13 @@ import type {
 function normalizeApiUrl(raw?: string): string | null {
   if (!raw || !raw.trim()) return null;
   const clean = raw.trim().replace(/\/+$/, '');
+  if (
+    clean === 'null' ||
+    clean === 'undefined' ||
+    (!clean.startsWith('http://') && !clean.startsWith('https://') && !clean.startsWith('/'))
+  ) {
+    return null;
+  }
   return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
 }
 

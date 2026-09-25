@@ -16,6 +16,7 @@ from app.models.report import ForensicDossier, HealthResponse
 router = APIRouter()
 
 MAX_DATASET_ROWS = 500_000
+MAX_DATASET_COLUMNS = 1_000
 
 
 @router.get(
@@ -56,8 +57,9 @@ async def investigate_dataset(
         )
 
     # 2. Ingest stream and enforce size boundary in memory
+    max_bytes = settings.FORMAT_SIZE_LIMITS_BYTES.get(ext, settings.MAX_UPLOAD_SIZE_BYTES)
     try:
-        content = await file.read()
+        content = await file.read(max_bytes + 1)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -71,7 +73,6 @@ async def investigate_dataset(
             detail="Uploaded dataset file is completely empty (0 bytes).",
         )
 
-    max_bytes = settings.FORMAT_SIZE_LIMITS_BYTES.get(ext, settings.MAX_UPLOAD_SIZE_BYTES)
     if file_size > max_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -116,12 +117,20 @@ async def investigate_dataset(
             detail=f"Dataset contains {len(df):,} records, which exceeds the maximum processing limit of {MAX_DATASET_ROWS:,} rows.",
         )
 
+    if len(df.columns) > MAX_DATASET_COLUMNS:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Dataset contains {len(df.columns):,} columns, which exceeds the maximum processing limit of {MAX_DATASET_COLUMNS:,} columns.",
+        )
+
     target_clean = target_column.strip() if target_column else None
     if target_clean:
         if target_clean not in df.columns:
+            col_preview = [str(c) for c in list(df.columns)[:20]]
+            suffix = f" (and {len(df.columns) - 20} more)" if len(df.columns) > 20 else ""
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Specified target column '{target_clean}' does not exist in dataset. Available columns: {list(df.columns)}.",
+                detail=f"Specified target column '{target_clean}' does not exist in dataset. Available columns: {col_preview}{suffix}.",
             )
 
     # 5. Execute Forensic Pipeline (Zero-Retention: in-memory execution)

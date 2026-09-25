@@ -497,3 +497,36 @@ def test_parse_pdf_incompatible_page_schema_skipped(monkeypatch):
     assert page_count == 2
     assert list(df.columns) == ["employee_id", "department"]
     assert len(df) == 2
+
+
+def test_detect_file_type_pdf_with_excel_magic_bytes_rejected():
+    """Ensure a .pdf filename containing ZIP/XLSX or OLE2/XLS magic bytes is rejected."""
+    with pytest.raises(ValueError, match="OpenXML/ZIP"):
+        detect_file_type("disguised.pdf", b"PK\x03\x04\x14\x00\x00\x00")
+
+    with pytest.raises(ValueError, match="legacy OLE/XLS"):
+        detect_file_type("disguised.pdf", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1\x00\x00")
+
+
+def test_api_corrupted_excel_does_not_leak_internal_exceptions():
+    """Ensure corrupted .xlsx and .xls uploads return clean 400 messages without internal library tracebacks."""
+    corrupted_xlsx = b"PK\x03\x04corrupted_not_a_valid_zip_archive_directory"
+    resp_xlsx = client.post(
+        "/api/v1/investigate",
+        files={"file": ("broken.xlsx", corrupted_xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert resp_xlsx.status_code == 400
+    detail_xlsx = resp_xlsx.json()["detail"]
+    assert "Unable to read Excel file (.xlsx)" in detail_xlsx
+    assert "BadZipFile" not in detail_xlsx
+    assert "File is not a zip file" not in detail_xlsx
+
+    corrupted_xls = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1corrupted_ole2_stream_payload"
+    resp_xls = client.post(
+        "/api/v1/investigate",
+        files={"file": ("broken.xls", corrupted_xls, "application/vnd.ms-excel")},
+    )
+    assert resp_xls.status_code == 400
+    detail_xls = resp_xls.json()["detail"]
+    assert "Unable to read Excel file (.xls)" in detail_xls
+    assert "XLRDError" not in detail_xls

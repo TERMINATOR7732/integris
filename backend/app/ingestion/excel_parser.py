@@ -39,7 +39,9 @@ def parse_excel(content: bytes, file_type: str) -> tuple[pd.DataFrame, str, list
         except ValueError:
             raise
         except Exception as e:
-            raise ValueError(f"Unable to read Excel file ({file_type}): {str(e)}") from e
+            raise ValueError(
+                f"Unable to read Excel file (.{file_type}). The workbook may be corrupted, malformed, or password-protected."
+            ) from e
 
     engine = "openpyxl" if file_type == "xlsx" else "xlrd"
     bio = io.BytesIO(content)
@@ -47,7 +49,9 @@ def parse_excel(content: bytes, file_type: str) -> tuple[pd.DataFrame, str, list
     try:
         excel_file = pd.ExcelFile(bio, engine=engine)
     except Exception as e:
-        raise ValueError(f"Unable to read Excel file ({file_type}): {str(e)}") from e
+        raise ValueError(
+            f"Unable to read Excel file (.{file_type}). The workbook may be corrupted, malformed, or password-protected."
+        ) from e
 
     available_sheets = excel_file.sheet_names
     if not available_sheets:
