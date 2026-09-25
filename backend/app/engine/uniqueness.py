@@ -5,6 +5,7 @@ and composite candidate identifiers.
 """
 
 from typing import Any
+import re
 import pandas as pd
 
 from app.models.report import (
@@ -15,6 +16,50 @@ from app.models.report import (
     Recommendation,
     Severity,
 )
+
+STRONG_ID_TOKENS = {"id", "uuid", "guid", "pk", "identifier", "ident"}
+
+NON_IDENTIFIER_KEY_MODIFIERS = {
+    "foreign", "fk", "sort", "partition", "group", "routing", "cache", "meta",
+    "encryption", "public", "private", "secret", "license", "config", "setting",
+}
+
+ENTITY_CODE_QUALIFIERS = {
+    "product", "customer", "user", "employee", "emp", "record", "account",
+    "client", "vendor", "member", "item", "order", "invoice", "transaction",
+    "txn", "entity", "person", "patient", "student", "supplier", "merchant",
+    "asset", "serial", "tracking", "sku", "unique", "primary", "lookup",
+}
+
+
+def _tokenize_column_name(col_name: str) -> list[str]:
+    """Split a column name into lowercase semantic tokens across naming conventions.
+
+    Handles snake_case, kebab-case, spaces, camelCase, and PascalCase.
+    """
+    step1 = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", col_name.strip())
+    step2 = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", step1)
+    return [tok.lower() for tok in re.split(r"[^a-zA-Z0-9]+", step2) if tok]
+
+
+def _is_identifier_column(col_name: str) -> bool:
+    """Determine whether a column name carries entity identifier semantics."""
+    tokens = _tokenize_column_name(col_name)
+    if not tokens:
+        return False
+
+    token_set = set(tokens)
+
+    if token_set & STRONG_ID_TOKENS:
+        return True
+
+    if "key" in token_set and not (token_set & NON_IDENTIFIER_KEY_MODIFIERS):
+        return True
+
+    if "code" in token_set and (token_set & ENTITY_CODE_QUALIFIERS):
+        return True
+
+    return False
 
 
 def analyze_uniqueness(
@@ -91,15 +136,17 @@ def analyze_uniqueness(
 
     # 2. Candidate Primary-Key Collisions & Nulls
     col_profile_map = {p.name: p for p in column_profiles}
-    id_tokens = {"id", "uuid", "key", "code", "guid", "pk", "employee_id", "customer_id", "user_id"}
 
     for col in df.columns:
         col_str = str(col)
-        col_lower = col_str.lower()
         profile = col_profile_map.get(col_str)
 
-        is_named_id = any(tok in col_lower for tok in id_tokens)
-        is_candidate = profile.is_candidate_identifier if profile else False
+        is_named_id = _is_identifier_column(col_str)
+        is_candidate = (
+            profile.is_candidate_identifier
+            if (profile and (is_named_id or profile.unique_count == total_rows))
+            else False
+        )
 
         if is_named_id or is_candidate:
             series = df[col]

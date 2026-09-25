@@ -1,7 +1,19 @@
 """Excel parser for .xlsx and .xls files."""
 
+from datetime import date, datetime
 import io
 import pandas as pd
+
+
+def _normalize_excel_datetime_cell(val: object) -> object:
+    """Format Python datetime/date instances in mixed object columns to ISO strings."""
+    if pd.isna(val):
+        return val
+    if isinstance(val, datetime):
+        return val.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(val, date):
+        return val.strftime("%Y-%m-%d")
+    return val
 
 
 def parse_excel(content: bytes, file_type: str) -> tuple[pd.DataFrame, str, list[str]]:
@@ -50,5 +62,9 @@ def parse_excel(content: bytes, file_type: str) -> tuple[pd.DataFrame, str, list
     for col in df_result.columns:
         if pd.api.types.is_datetime64_any_dtype(df_result[col]):
             df_result[col] = df_result[col].dt.strftime("%Y-%m-%d %H:%M:%S")
+        elif df_result[col].dtype == object:
+            non_null = df_result[col].dropna()
+            if not non_null.empty and non_null.map(lambda v: isinstance(v, (datetime, date))).any():
+                df_result[col] = df_result[col].map(_normalize_excel_datetime_cell)
 
     return df_result, selected_sheet, available_sheets

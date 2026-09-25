@@ -227,6 +227,105 @@ def test_parse_pdf_non_tabular_certificate_rejected():
             parse_pdf(cert_bytes)
 
 
+def test_parse_pdf_numeric_inference_and_text_preservation(monkeypatch):
+    """Verify PDF table extraction infers numeric columns while preserving IDs, dates, text, and mixed columns."""
+    from app.engine.profiler import profile_dataset
+    from app.models.report import SemanticType
+
+    class DummyPage:
+        def extract_tables(self):
+            return [[
+                ["employee_id", "user_id", "hire_date", "department", "amount", "count", "mixed_col"],
+                ["EMP-101", "1001", "2026-09-25", "Engineering", "100", "10", "100"],
+                ["EMP-102", "1002", "2026-09-26", "Finance", "42.5", "-17", "unknown"],
+                ["EMP-103", "1003", "2026-09-27", "Legal", "-17", "25", "42.5"],
+                ["EMP-104", "1004", "2026-09-28", "Operations", "88.25", "0", "99"],
+                ["EMP-105", "1005", "2026-09-29", "Engineering", "150", "5", "85"],
+            ]]
+
+    class DummyPDF:
+        def __init__(self):
+            self.pages = [DummyPage()]
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    import pdfplumber
+    monkeypatch.setattr(pdfplumber, "open", lambda _: DummyPDF())
+
+    df, page_count, _ = parse_pdf(b"%PDF-1.4 dummy")
+    assert page_count == 1
+
+    # Numeric columns must have numeric dtypes
+    assert pd.api.types.is_float_dtype(df["amount"])
+    assert pd.api.types.is_integer_dtype(df["count"])
+    assert df["amount"].tolist() == [100.0, 42.5, -17.0, 88.25, 150.0]
+    assert df["count"].tolist() == [10, -17, 25, 0, 5]
+
+    # Identifiers, dates, text, and mixed columns must remain string/object (not coerced to numeric)
+    for str_col in ("employee_id", "user_id", "hire_date", "department", "mixed_col"):
+        assert pd.api.types.is_string_dtype(df[str_col]) or df[str_col].dtype == object
+        assert not pd.api.types.is_numeric_dtype(df[str_col])
+
+    # Verify downstream profiler receives numeric dtypes and computes stats
+    _, profiles = profile_dataset(df)
+    prof_map = {p.name: p for p in profiles}
+    assert prof_map["amount"].semantic_type == SemanticType.NUMERIC_CONTINUOUS
+    assert prof_map["amount"].min_value == -17.0
+    assert prof_map["amount"].max_value == 150.0
+
+
+def test_parse_pdf_multipage_coalesces_only_valid_tables(monkeypatch):
+    """Verify valid multi-page tables are coalesced while rejected tables in extracted_tables do not contaminate rows."""
+    rejected_banner_table = [
+        [" Decorative Header Box With Multi-line Prose\nLine 2\nLine 3\nLine 4 ", " Banner Side\nLine 2\nLine 3\nLine 4 "],
+        [" Paragraph block one\nLine 2\nLine 3\nLine 4 ", " Paragraph block two\nLine 2\nLine 3\nLine 4 "],
+    ]
+    valid_page1_table = [
+        ["employee_id", "score"],
+        ["EMP-01", "100"],
+        ["EMP-02", "42.5"],
+    ]
+    valid_page2_table = [
+        ["employee_id", "score"],
+        ["EMP-03", "-17"],
+        ["EMP-04", "85"],
+    ]
+    rejected_footer_table = [
+        [" Footer disclaimer\nLine 2\nLine 3\nLine 4 ", " Signature block\nLine 2\nLine 3\nLine 4 "],
+        [" Legal text\nLine 2\nLine 3\nLine 4 ", " Stamp area\nLine 2\nLine 3\nLine 4 "],
+    ]
+
+    class DummyPage:
+        def __init__(self, tables):
+            self._tables = tables
+        def extract_tables(self):
+            return self._tables
+
+    class DummyPDF:
+        def __init__(self):
+            self.pages = [
+                DummyPage([rejected_banner_table, valid_page1_table]),
+                DummyPage([valid_page2_table, rejected_footer_table]),
+            ]
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    import pdfplumber
+    monkeypatch.setattr(pdfplumber, "open", lambda _: DummyPDF())
+
+    df, page_count, _ = parse_pdf(b"%PDF-1.4 dummy")
+    assert page_count == 2
+    assert list(df.columns) == ["employee_id", "score"]
+    assert len(df) == 4
+    assert df["employee_id"].tolist() == ["EMP-01", "EMP-02", "EMP-03", "EMP-04"]
+    assert df["score"].tolist() == [100.0, 42.5, -17.0, 85.0]
+
+
+
 # ==============================================================================
 # 6. End-to-End API Integration Tests (POST /api/v1/investigate)
 # ==============================================================================

@@ -5,6 +5,7 @@ impossible numeric bounds, and semantic state conflicts.
 """
 
 import math
+import re
 from typing import Any
 import pandas as pd
 
@@ -27,6 +28,22 @@ TEMPORAL_PAIRS = [
 
 # Defensible non-negative keywords
 NON_NEGATIVE_TOKENS = ["count", "quantity", "qty", "items", "age", "days", "hours", "units", "visits", "clicks"]
+
+
+def _tokenize_column_name(col_name: str) -> list[str]:
+    """Split a column name into lowercase semantic tokens across naming conventions.
+
+    Handles snake_case, kebab-case, spaces, camelCase, and PascalCase.
+    """
+    step1 = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", col_name.strip())
+    step2 = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", step1)
+    return [tok.lower() for tok in re.split(r"[^a-zA-Z0-9]+", step2) if tok]
+
+
+def _has_non_negative_semantics(col_name: str) -> bool:
+    """Return True if column name contains a standalone non-negative domain token."""
+    tokens = set(_tokenize_column_name(col_name))
+    return bool(tokens & set(NON_NEGATIVE_TOKENS))
 
 
 def analyze_consistency(
@@ -128,8 +145,7 @@ def analyze_consistency(
     # 2. Defensible Non-Negative Columns with Negative Values
     for col in cols:
         col_str = str(col)
-        col_lower = col_str.lower()
-        if any(token in col_lower for token in NON_NEGATIVE_TOKENS):
+        if _has_non_negative_semantics(col_str):
             series = pd.to_numeric(df[col], errors="coerce")
             neg_mask = series < 0
             neg_count = int(neg_mask.sum())

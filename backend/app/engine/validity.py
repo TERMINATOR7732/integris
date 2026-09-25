@@ -6,6 +6,7 @@ Detects type drift (mixed types in numeric columns), format anomalies
 
 import re
 from typing import Any
+import numpy as np
 import pandas as pd
 
 from app.models.report import (
@@ -17,22 +18,40 @@ from app.models.report import (
     Severity,
 )
 
-# Common date regex patterns for format inference
+# Common date regex patterns for format inference (supports ISO date and normalized datetime)
 DATE_PATTERNS = [
-    ("ISO_8601", r"^\d{4}-\d{2}-\d{2}$"),
-    ("SLASH_DMY", r"^\d{1,2}/\d{1,2}/\d{4}$"),
-    ("SLASH_MDY", r"^\d{1,2}/\d{1,2}/\d{2}$"),
-    ("DOT_DMY", r"^\d{1,2}\.\d{1,2}\.\d{4}$"),
+    (
+        "ISO_8601",
+        r"^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:[ T](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?)?$",
+    ),
+    ("SLASH_DMY", r"^(?:0?[1-9]|[12]\d|3[01])/(?:0?[1-9]|1[0-2])/\d{4}$"),
+    ("SLASH_MDY", r"^(?:0?[1-9]|1[0-2])/(?:0?[1-9]|[12]\d|3[01])/\d{2}$"),
+    ("DOT_DMY", r"^(?:0?[1-9]|[12]\d|3[01])\.(?:0?[1-9]|1[0-2])\.\d{4}$"),
 ]
 
 
+def _match_date_pattern(str_dates: pd.Series, pat_name: str, pat_regex: str) -> pd.Series:
+    """Match date strings against pattern regex and verify calendar validity."""
+    matches = str_dates.str.match(pat_regex)
+    if not matches.any():
+        return matches
+
+    if pat_name == "ISO_8601":
+        valid_cal = pd.to_datetime(str_dates[matches], format="ISO8601", errors="coerce").notna()
+        result = matches.copy()
+        result.loc[matches] = valid_cal
+        return result
+
+    return matches
+
+
 def _try_parse_numeric(val: Any) -> bool:
-    """Return True if scalar value can be converted to float."""
-    if pd.isna(val):
+    """Return True if scalar value can be converted to a finite float."""
+    if pd.isna(val) or isinstance(val, bool):
         return False
     try:
-        float(str(val).strip())
-        return True
+        parsed = float(str(val).strip())
+        return bool(np.isfinite(parsed))
     except (ValueError, TypeError):
         return False
 
@@ -65,7 +84,8 @@ def analyze_validity(
 
         # 1. Type Drift in Object Columns (Predominantly Numeric with Contaminated Strings)
         if series.dtype == object or isinstance(series.dtype, pd.StringDtype):
-            numeric_mask = non_null_series.apply(_try_parse_numeric)
+            coerced_numeric = pd.to_numeric(non_null_series.astype(str).str.strip(), errors="coerce")
+            numeric_mask = coerced_numeric.notna() & np.isfinite(coerced_numeric)
             numeric_count = int(numeric_mask.sum())
             numeric_ratio = numeric_count / non_null_count
 
@@ -118,11 +138,13 @@ def analyze_validity(
         if is_date_named and (series.dtype == object or isinstance(series.dtype, pd.StringDtype)):
             str_dates = non_null_series.astype(str).str.strip()
             pattern_counts: dict[str, int] = {}
+            pattern_masks: dict[str, pd.Series] = {}
             for pat_name, pat_regex in DATE_PATTERNS:
-                matches = str_dates.str.match(pat_regex)
+                matches = _match_date_pattern(str_dates, pat_name, pat_regex)
                 count = int(matches.sum())
                 if count > 0:
                     pattern_counts[pat_name] = count
+                    pattern_masks[pat_name] = matches
 
             if len(pattern_counts) > 1 or (len(pattern_counts) == 1 and sum(pattern_counts.values()) < non_null_count):
                 # Dominant format vs anomalies
@@ -133,8 +155,8 @@ def analyze_validity(
                 if anomaly_count > 0 and (anomaly_count / non_null_count) >= 0.02:
                     # Find rows not matching dominant pattern
                     if sorted_patterns:
-                        _, dom_regex = next(p for p in DATE_PATTERNS if p[0] == dominant_pattern)
-                        non_matching = str_dates[~str_dates.str.match(dom_regex)]
+                        dom_mask = pattern_masks[dominant_pattern]
+                        non_matching = str_dates[~dom_mask]
                     else:
                         non_matching = str_dates
 

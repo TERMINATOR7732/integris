@@ -1,8 +1,52 @@
 """PDF tabular extractor for INTEGRIS."""
 
 import io
+import re
+import numpy as np
 import pdfplumber
 import pandas as pd
+
+from app.engine.uniqueness import _is_identifier_column
+
+NUMERIC_LITERAL_PATTERN = re.compile(r"^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$")
+LEADING_ZERO_ID_PATTERN = re.compile(r"^[+-]?0\d+$")
+
+
+def _infer_pdf_column_dtype(series: pd.Series, col_name: str) -> pd.Series:
+    """Infer numeric dtype for a PDF column when all non-empty values are valid numbers.
+
+    Preserves identifiers, leading-zero codes, dates, categorical values, and mixed columns as strings.
+    """
+    if _is_identifier_column(col_name):
+        return series
+
+    non_empty_mask = series.notna() & (series.astype(str) != "")
+    if not non_empty_mask.any():
+        return series
+
+    non_empty_strs = series.loc[non_empty_mask].astype(str)
+
+    # Preserve leading-zero identifier/code strings (e.g. '00123')
+    if non_empty_strs.str.match(LEADING_ZERO_ID_PATTERN).any():
+        return series
+
+    # Require every non-empty cell to match a numeric literal (do not coerce mixed columns)
+    if not non_empty_strs.str.match(NUMERIC_LITERAL_PATTERN).all():
+        return series
+
+    normalized = series.where(non_empty_mask, None)
+    coerced = pd.to_numeric(normalized, errors="coerce")
+    if not (coerced.loc[non_empty_mask].notna().all() and np.isfinite(coerced.loc[non_empty_mask]).all()):
+        return series
+
+    has_decimal_or_exp = non_empty_strs.str.contains(r"[\.eE]", regex=True).any()
+    if non_empty_mask.all() and not has_decimal_or_exp:
+        try:
+            return coerced.astype("int64")
+        except (ValueError, TypeError, OverflowError):
+            return coerced.astype("float64")
+
+    return coerced.astype("float64")
 
 
 def parse_pdf(content: bytes) -> tuple[pd.DataFrame, int, int]:
@@ -88,8 +132,8 @@ def parse_pdf(content: bytes) -> tuple[pd.DataFrame, int, int]:
             padded = list(row[:col_count]) + [None] * max(0, col_count - len(row))
             combined_rows.append(padded)
 
-    # Check subsequent tables: coalesce if column count matches
-    for tbl in extracted_tables[1:]:
+    # Check subsequent validated tables: coalesce if column count matches
+    for tbl in valid_tables[1:]:
         if len(tbl[0]) == col_count:
             tbl_headers = [str(h).strip() if h is not None else "" for h in tbl[0]]
             norm_primary = [str(h).strip() if h is not None else "" for h in raw_headers]
@@ -106,8 +150,9 @@ def parse_pdf(content: bytes) -> tuple[pd.DataFrame, int, int]:
 
     df = pd.DataFrame(combined_rows, columns=unique_headers)
 
-    # Clean whitespace in string cells
+    # Clean whitespace in string cells and infer numeric column types where appropriate
     for col in df.columns:
         df[col] = df[col].apply(lambda v: v.strip() if isinstance(v, str) else v)
+        df[col] = _infer_pdf_column_dtype(df[col], str(col))
 
     return df, page_count, 1
