@@ -62,7 +62,7 @@ def parse_excel(content: bytes, file_type: str) -> tuple[pd.DataFrame, str, list
 
     for sheet in available_sheets:
         try:
-            df = pd.read_excel(excel_file, sheet_name=sheet)
+            df = pd.read_excel(excel_file, sheet_name=sheet, keep_default_na=False, na_values=[""])
         except Exception:
             continue
 

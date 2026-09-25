@@ -98,7 +98,6 @@ def test_profiler_identifier_semantic_classification_token_aware() -> None:
         "user_uuid",
         "identifier",
         "primary_key",
-        "product_code",
         "customer_code",
         "lookup_key",
         "userId",
@@ -116,6 +115,7 @@ def test_profiler_identifier_semantic_classification_token_aware() -> None:
         "country_code",
         "status_code",
         "region_code",
+        "product_code",
     ]
 
     data = {col: vals for col in id_cols + non_id_cols}

@@ -28,13 +28,43 @@ TEMPORAL_PAIRS = [
     ),
     (
         {"birth", "birthdate", "dob"},
-        {"hire", "hired", "join", "joined", "start", "started", "graduate", "graduated", "graduation"},
+        {"hire", "hired", "join", "joined", "start", "started", "graduate", "graduated", "graduation", "enroll", "enrolled", "enrollment"},
         "Event date occurs prior to date of birth",
     ),
     (
         {"order", "ordered", "booking", "booked", "creation", "created"},
         {"ship", "shipped", "shipping", "shipment", "deliver", "delivered", "delivery", "dispatch", "dispatched", "fulfill", "fulfilled", "fulfillment"},
         "Fulfillment/delivery date occurs prior to order date",
+    ),
+    (
+        {"ship", "shipped", "shipping", "shipment", "dispatch", "dispatched"},
+        {"deliver", "delivered", "delivery"},
+        "Delivery date occurs chronologically prior to ship/dispatch date",
+    ),
+    (
+        {"admit", "admitted", "admission"},
+        {"discharge", "discharged"},
+        "Discharge date occurs chronologically prior to admission date",
+    ),
+    (
+        {"enroll", "enrolled", "enrollment"},
+        {"graduate", "graduated", "graduation"},
+        "Graduation date occurs chronologically prior to enrollment date",
+    ),
+    (
+        {"open", "opened", "opening"},
+        {"close", "closed", "closing", "resolve", "resolved", "resolution"},
+        "Closed/resolution date occurs chronologically prior to opened date",
+    ),
+    (
+        {"pickup", "picked", "collection", "collected"},
+        {"deliver", "delivered", "delivery", "dropoff"},
+        "Delivery date occurs chronologically prior to pickup date",
+    ),
+    (
+        {"transaction", "txn", "trade"},
+        {"settle", "settled", "settlement", "clearing", "cleared"},
+        "Settlement date occurs chronologically prior to transaction date",
     ),
 ]
 
@@ -46,7 +76,12 @@ TEMPORAL_COLUMN_TOKENS = {
     "ship", "shipped", "shipping", "shipment", "deliver", "delivered", "delivery",
     "dispatch", "dispatched", "fulfill", "fulfilled", "fulfillment", "leave",
     "resign", "resigned", "onboard", "onboarded", "offboard", "offboarded",
-    "entry", "graduate", "graduated", "graduation",
+    "entry", "graduate", "graduated", "graduation", "admit", "admitted",
+    "admission", "discharge", "discharged", "enroll", "enrolled", "enrollment",
+    "open", "opened", "opening", "close", "closed", "closing", "resolve",
+    "resolved", "resolution", "pickup", "picked", "collection", "collected",
+    "dropoff", "transaction", "txn", "trade", "settle", "settled", "settlement",
+    "clearing", "cleared",
 }
 
 # Defensible non-negative keywords
@@ -121,14 +156,16 @@ def analyze_consistency(
 
     # 1. Temporal Ordering Contradictions
     parsed_dates: dict[str, pd.Series] = {}
+    seen_pairs: set[tuple[str, str]] = set()
     for start_tokens, end_tokens, rule_desc in TEMPORAL_PAIRS:
         matched_starts = [c for c in date_like_cols if _matches_temporal_tokens(c, start_tokens)]
         matched_ends = [c for c in date_like_cols if _matches_temporal_tokens(c, end_tokens)]
 
         for matched_start in matched_starts:
             for matched_end in matched_ends:
-                if matched_start == matched_end:
+                if matched_start == matched_end or (matched_start, matched_end) in seen_pairs:
                     continue
+                seen_pairs.add((matched_start, matched_end))
                 if matched_start not in parsed_dates:
                     parsed_dates[matched_start] = pd.to_datetime(df[matched_start], errors="coerce", format="mixed")
                 if matched_end not in parsed_dates:
@@ -149,7 +186,15 @@ def analyze_consistency(
 
                 valid_mask = s_series.notna() & e_series.notna()
                 if valid_mask.sum() > 0:
-                    inversion_mask = valid_mask & (e_series < s_series)
+                    # When start column has time-of-day precision (e.g. transaction_datetime)
+                    # and end column is calendar-date-only (00:00:00), compare at calendar-day grain
+                    s_valid = s_series[valid_mask]
+                    e_valid = e_series[valid_mask]
+                    s_has_time = bool((s_valid.dt.floor("D") != s_valid).any())
+                    e_has_time = bool((e_valid.dt.floor("D") != e_valid).any())
+                    s_cmp = s_series.dt.floor("D") if (s_has_time and not e_has_time) else s_series
+
+                    inversion_mask = valid_mask & (e_series < s_cmp)
                     inversion_count = int(inversion_mask.sum())
 
                     if inversion_count > 0:

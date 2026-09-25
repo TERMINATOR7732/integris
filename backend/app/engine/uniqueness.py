@@ -25,10 +25,16 @@ NON_IDENTIFIER_KEY_MODIFIERS = {
 }
 
 ENTITY_CODE_QUALIFIERS = {
-    "product", "customer", "user", "employee", "emp", "record", "account",
-    "client", "vendor", "member", "item", "order", "invoice", "transaction",
+    "customer", "user", "employee", "emp", "record", "account",
+    "client", "vendor", "member", "order", "invoice", "transaction",
     "txn", "entity", "person", "patient", "student", "supplier", "merchant",
-    "asset", "serial", "tracking", "sku", "unique", "primary", "lookup",
+    "asset", "serial", "tracking", "unique", "primary", "lookup",
+}
+
+FOREIGN_KEY_ROLE_TOKENS = {
+    "manager", "supervisor", "parent", "agent", "physician", "doctor",
+    "attending", "reviewer", "approver", "assigned", "assignee",
+    "creator", "author", "owner", "referrer", "sponsor", "broker",
 }
 
 
@@ -143,6 +149,29 @@ def analyze_uniqueness(
     # 2. Candidate Primary-Key Collisions & Nulls
     col_profile_map = {p.name: p for p in column_profiles}
 
+    named_id_ratios: dict[str, float] = {}
+    has_intact_primary_id = False
+    for c in df.columns:
+        c_str = str(c)
+        if _is_identifier_column(c_str):
+            prof_c = col_profile_map.get(c_str)
+            if prof_c is not None:
+                u_count = prof_c.unique_count
+                nn_count = prof_c.non_null_count
+                n_count = prof_c.null_count
+            else:
+                s_nn = df[c].dropna()
+                nn_count = len(s_nn)
+                u_count = int(s_nn.nunique())
+                n_count = total_rows - nn_count
+            u_ratio = (u_count / nn_count) if nn_count > 0 else 0.0
+            named_id_ratios[c_str] = u_ratio
+            if u_count == total_rows and n_count == 0 and total_rows > 1:
+                has_intact_primary_id = True
+
+    max_named_id_ratio = max(named_id_ratios.values()) if named_id_ratios else 0.0
+    primary_collision_index_sets: list[set[Any]] = []
+
     for col in df.columns:
         col_str = str(col)
         profile = col_profile_map.get(col_str)
@@ -159,50 +188,75 @@ def analyze_uniqueness(
             null_count = int(series.isna().sum())
             non_null_series = series.dropna()
             non_null_count = len(non_null_series)
+            unique_count = profile.unique_count if profile is not None else int(non_null_series.nunique())
+            unique_ratio = (unique_count / non_null_count) if non_null_count > 0 else 0.0
+            collision_count = int(non_null_series.duplicated(keep="first").sum()) if non_null_count > 0 else 0
+
+            # Disambiguate repeating foreign-key / hierarchy columns from candidate primary keys
+            col_tokens = set(_tokenize_column_name(col_str))
+            is_foreign_key = False
+            if (col_tokens & FOREIGN_KEY_ROLE_TOKENS) and max_named_id_ratio > unique_ratio:
+                is_foreign_key = True
+            elif unique_ratio < 0.80 and (
+                total_rows >= 5 or collision_count > 1 or max_named_id_ratio > unique_ratio
+            ):
+                is_foreign_key = True
+            elif has_intact_primary_id and unique_ratio < 0.95:
+                is_foreign_key = True
+
+            if is_foreign_key:
+                continue
 
             # Check key collisions (duplicates within candidate ID)
-            if non_null_count > 0:
+            if non_null_count > 0 and collision_count > 0:
                 id_dup_mask = non_null_series.duplicated(keep=False)
-                collision_count = int(non_null_series.duplicated(keep="first").sum())
+                collision_indices = non_null_series[id_dup_mask].index.tolist()
+                collision_idx_set = set(collision_indices)
 
-                if collision_count > 0:
-                    collision_ratio = collision_count / total_rows
-                    collision_indices = non_null_series[id_dup_mask].index.tolist()
-                    colliding_values = non_null_series[id_dup_mask].unique().tolist()[:5]
+                # Skip secondary identifier columns whose duplicate rows are already
+                # explained by an earlier primary-key collision on the exact same records
+                if primary_collision_index_sets and any(
+                    collision_idx_set.issubset(prev_set) for prev_set in primary_collision_index_sets
+                ):
+                    continue
 
-                    findings.append(
-                        Finding(
-                            id=f"FND-UNQ-PK-COLLISION-{col_str}",
-                            category=FindingCategory.UNIQUENESS,
-                            severity=Severity.CRITICAL,
-                            title=f"Primary key collision in candidate identifier '{col_str}'",
-                            description=(
-                                f"Column '{col_str}' appears to be an entity identifier but contains {collision_count} colliding "
-                                f"records ({collision_ratio:.1%}). Repeating values like {colliding_values} destroy entity uniqueness."
-                            ),
-                            affected_columns=[col_str],
-                            affected_row_count=collision_count,
-                            affected_row_ratio=round(collision_ratio, 4),
-                            evidence=[
-                                Evidence(
-                                    metric_name="identifier_collision_count",
-                                    observed_value=collision_count,
-                                    threshold_or_expected=0,
-                                    sample_row_indices=collision_indices[:10],
-                                    sample_values=colliding_values,
-                                    details=f"Conflicting identical keys detected in multiple separate records: {colliding_values}.",
-                                )
-                            ],
-                            recommendations=[
-                                Recommendation(
-                                    finding_id=f"FND-UNQ-PK-COLLISION-{col_str}",
-                                    action=f"Resolve identifier collision in '{col_str}' before attempting database joins or entity mapping.",
-                                    reason="Non-unique identifiers cause exponential cartesian explosions during relational joins.",
-                                    priority=Severity.CRITICAL,
-                                )
-                            ],
-                        )
+                primary_collision_index_sets.append(collision_idx_set)
+                collision_ratio = collision_count / total_rows
+                colliding_values = non_null_series[id_dup_mask].unique().tolist()[:5]
+
+                findings.append(
+                    Finding(
+                        id=f"FND-UNQ-PK-COLLISION-{col_str}",
+                        category=FindingCategory.UNIQUENESS,
+                        severity=Severity.CRITICAL,
+                        title=f"Primary key collision in candidate identifier '{col_str}'",
+                        description=(
+                            f"Column '{col_str}' appears to be an entity identifier but contains {collision_count} colliding "
+                            f"records ({collision_ratio:.1%}). Repeating values like {colliding_values} destroy entity uniqueness."
+                        ),
+                        affected_columns=[col_str],
+                        affected_row_count=collision_count,
+                        affected_row_ratio=round(collision_ratio, 4),
+                        evidence=[
+                            Evidence(
+                                metric_name="identifier_collision_count",
+                                observed_value=collision_count,
+                                threshold_or_expected=0,
+                                sample_row_indices=collision_indices[:10],
+                                sample_values=colliding_values,
+                                details=f"Conflicting identical keys detected in multiple separate records: {colliding_values}.",
+                            )
+                        ],
+                        recommendations=[
+                            Recommendation(
+                                finding_id=f"FND-UNQ-PK-COLLISION-{col_str}",
+                                action=f"Resolve identifier collision in '{col_str}' before attempting database joins or entity mapping.",
+                                reason="Non-unique identifiers cause exponential cartesian explosions during relational joins.",
+                                priority=Severity.CRITICAL,
+                            )
+                        ],
                     )
+                )
 
             # Check nulls in candidate ID
             if null_count > 0 and is_named_id:
@@ -240,6 +294,7 @@ def analyze_uniqueness(
                         ],
                     )
                 )
+
 
     # 3. Composite Uniqueness Diagnostic (INFO signal if found)
     # If no single column is 100% unique, search for small 2-column composite key

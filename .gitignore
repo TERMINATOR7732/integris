@@ -78,6 +78,7 @@ Thumbs.db
 *stress*.csv
 datasets/*stress*.csv
 test_*.json
+integris_validation_results.json
 *.pdf
 integris_employee_attrition_forensics.csv
 

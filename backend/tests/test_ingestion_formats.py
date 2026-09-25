@@ -530,3 +530,97 @@ def test_api_corrupted_excel_does_not_leak_internal_exceptions():
     detail_xls = resp_xls.json()["detail"]
     assert "Unable to read Excel file (.xls)" in detail_xls
     assert "XLRDError" not in detail_xls
+
+
+def test_parse_excel_preserves_na_text_sentinels_and_blank_cells():
+    """Verify Excel ingestion preserves literal 'N/A' strings for type-drift/sentinel detection while treating blank cells as NaN."""
+    from app.engine.completeness import analyze_completeness
+    from app.engine.profiler import profile_dataset
+    from app.engine.validity import analyze_validity
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Transactions"
+    ws.append(["transaction_id", "amount", "notes"])
+    for i in range(19):
+        # 2 blank notes cells (>5% missingness) + valid numeric amounts
+        note_val = None if i < 2 else f"ok-{i}"
+        ws.append([f"TXN-{i:04d}", round(100.0 + i * 5.25, 2), note_val])
+    # 20th row has literal "N/A" in numeric amount column and empty string "" in notes
+    ws.append(["TXN-0019", "N/A", ""])
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    xlsx_bytes = bio.getvalue()
+
+    df, sheet, _ = parse_excel(xlsx_bytes, "xlsx")
+    assert sheet == "Transactions"
+    assert len(df) == 20
+    # Literal "N/A" must remain present in amount (not coerced to NaN)
+    assert (df["amount"].astype(str) == "N/A").sum() == 1
+    # Ordinary blank cells (None and "") must still be NaN
+    assert int(df["notes"].isna().sum()) == 3
+
+    _, profiles = profile_dataset(df)
+    val_findings = analyze_validity(df, profiles)
+    cmp_findings = analyze_completeness(df, profiles)
+    all_fids = {f.id for f in val_findings + cmp_findings}
+
+    assert "FND-VAL-TYPEDRIFT-amount" in all_fids
+    assert "FND-CMP-SENT-TXT-amount" in all_fids
+    assert "FND-CMP-MISS-notes" in all_fids
+
+
+def test_parse_pdf_retains_single_row_continuation_page_and_rejects_header_only(monkeypatch):
+    """Verify multi-page PDF retains a valid 1-row final continuation page while rejecting repeated-header-only pages and 1-row PDFs."""
+    import pdfplumber
+
+    page1_table = [
+        ["reading_id", "device_id", "temperature_c", "voltage", "vibration_mm_s"],
+        ["RD00001", "SENS-001", "22.5", "5.01", "0.41"],
+        ["RD00002", "SENS-002", "23.1", "4.99", "0.38"],
+    ]
+    page2_repeated_header_only = [
+        ["reading_id", "device_id", "temperature_c", "voltage", "vibration_mm_s"],
+    ]
+    page3_single_continuation_row = [
+        ["RD00003", "SENS-003", "4.59", "5.122", "0.801"],
+    ]
+
+    class DummyPage:
+        def __init__(self, tables):
+            self._tables = tables
+        def extract_tables(self):
+            return self._tables
+
+    class DummyMultiPagePDF:
+        def __init__(self):
+            self.pages = [
+                DummyPage([page1_table]),
+                DummyPage([page2_repeated_header_only]),
+                DummyPage([page3_single_continuation_row]),
+            ]
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(pdfplumber, "open", lambda _: DummyMultiPagePDF())
+    df, page_count, _ = parse_pdf(b"%PDF-1.4 dummy")
+    assert page_count == 3
+    assert len(df) == 3
+    assert df["reading_id"].tolist() == ["RD00001", "RD00002", "RD00003"]
+    assert pd.api.types.is_float_dtype(df["temperature_c"])
+
+    # Verify a PDF containing only a 1-row header table is still safely rejected
+    class DummyHeaderOnlyPDF:
+        def __init__(self):
+            self.pages = [DummyPage([page2_repeated_header_only])]
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(pdfplumber, "open", lambda _: DummyHeaderOnlyPDF())
+    with pytest.raises(ValueError, match="machine-readable tabular data"):
+        parse_pdf(b"%PDF-1.4 dummy")
