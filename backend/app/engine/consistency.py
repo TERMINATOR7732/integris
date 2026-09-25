@@ -19,12 +19,35 @@ from app.models.report import (
     Severity,
 )
 
-# Defensible temporal pairs: (start_pattern, end_pattern, description)
+# Defensible temporal pairs: (start_tokens, end_tokens, description)
 TEMPORAL_PAIRS = [
-    (["hire", "join", "start", "entry", "onboard"], ["exit", "term", "end", "leave", "resign", "offboard"], "Exit date occurs chronologically prior to hire/start date"),
-    (["birth", "dob"], ["hire", "join", "start", "graduat"], "Event date occurs prior to date of birth"),
-    (["order", "booking", "creation"], ["ship", "deliver", "dispatch", "fulfill"], "Fulfillment/delivery date occurs prior to order date"),
+    (
+        {"hire", "hired", "join", "joined", "start", "started", "entry", "onboard", "onboarded"},
+        {"exit", "exited", "term", "termination", "terminated", "end", "ended", "leave", "resign", "resigned", "offboard", "offboarded"},
+        "Exit date occurs chronologically prior to hire/start date",
+    ),
+    (
+        {"birth", "birthdate", "dob"},
+        {"hire", "hired", "join", "joined", "start", "started", "graduate", "graduated", "graduation"},
+        "Event date occurs prior to date of birth",
+    ),
+    (
+        {"order", "ordered", "booking", "booked", "creation", "created"},
+        {"ship", "shipped", "shipping", "shipment", "deliver", "delivered", "delivery", "dispatch", "dispatched", "fulfill", "fulfilled", "fulfillment"},
+        "Fulfillment/delivery date occurs prior to order date",
+    ),
 ]
+
+TEMPORAL_COLUMN_TOKENS = {
+    "date", "dates", "time", "datetime", "timestamp", "day", "dt", "dob",
+    "hire", "hired", "exit", "exited", "term", "termination", "terminated",
+    "join", "joined", "start", "started", "end", "ended", "birth", "birthdate",
+    "created", "updated", "order", "ordered", "booking", "booked", "creation",
+    "ship", "shipped", "shipping", "shipment", "deliver", "delivered", "delivery",
+    "dispatch", "dispatched", "fulfill", "fulfilled", "fulfillment", "leave",
+    "resign", "resigned", "onboard", "onboarded", "offboard", "offboarded",
+    "entry", "graduate", "graduated", "graduation",
+}
 
 # Defensible non-negative keywords
 NON_NEGATIVE_TOKENS = ["count", "quantity", "qty", "items", "age", "days", "hours", "units", "visits", "clicks"]
@@ -38,6 +61,18 @@ def _tokenize_column_name(col_name: str) -> list[str]:
     step1 = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", col_name.strip())
     step2 = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", step1)
     return [tok.lower() for tok in re.split(r"[^a-zA-Z0-9]+", step2) if tok]
+
+
+def _has_temporal_semantics(col_name: str) -> bool:
+    """Return True if column name contains a standalone temporal token."""
+    tokens = set(_tokenize_column_name(col_name))
+    return bool(tokens & TEMPORAL_COLUMN_TOKENS)
+
+
+def _matches_temporal_tokens(col_name: str, target_tokens: set[str] | list[str]) -> bool:
+    """Return True if tokenized column name intersects with target temporal role tokens."""
+    tokens = set(_tokenize_column_name(col_name))
+    return bool(tokens & set(target_tokens))
 
 
 def _has_non_negative_semantics(col_name: str) -> bool:
@@ -72,18 +107,20 @@ def analyze_consistency(
     date_like_cols = set()
     for col in cols:
         col_str = str(col)
-        c_lower = col_str.lower()
+        series = df[col]
+        if pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_datetime64_any_dtype(series):
+            continue
         profile = col_profile_map.get(col_str)
         is_dt_type = (profile.semantic_type == SemanticType.DATETIME) if profile else False
-        if is_dt_type or any(d in c_lower for d in ["date", "time", "day", "dt", "dob", "hire", "exit", "join", "start", "end"]):
-            parsed = pd.to_datetime(df[col].dropna().head(10), errors="coerce", format="mixed")
+        if is_dt_type or _has_temporal_semantics(col_str):
+            parsed = pd.to_datetime(series.dropna().head(10), errors="coerce", format="mixed")
             if parsed.notna().sum() >= 1:
                 date_like_cols.add(col_str)
 
     # 1. Temporal Ordering Contradictions
     for start_tokens, end_tokens, rule_desc in TEMPORAL_PAIRS:
-        matched_starts = [c for c in date_like_cols if any(t in c.lower() for t in start_tokens)]
-        matched_ends = [c for c in date_like_cols if any(t in c.lower() for t in end_tokens)]
+        matched_starts = [c for c in date_like_cols if _matches_temporal_tokens(c, start_tokens)]
+        matched_ends = [c for c in date_like_cols if _matches_temporal_tokens(c, end_tokens)]
 
         for matched_start in matched_starts:
             for matched_end in matched_ends:

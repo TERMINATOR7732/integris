@@ -134,3 +134,38 @@ def test_validity_numeric_parsing_edge_cases() -> None:
     mixed_finding = next(f for f in findings if f.id == "FND-VAL-TYPEDRIFT-mixed_column")
     assert mixed_finding.affected_row_count == 2
 
+
+def test_validity_slash_ymd_date_support() -> None:
+    """Recognize valid YYYY/MM/DD dates while rejecting impossible YYYY/MM/DD calendar dates."""
+    # 1. Pure valid YYYY/MM/DD column should have zero date format anomalies
+    df_valid = pd.DataFrame({
+        "promotion_date": [
+            "2027/09/15",
+            "2026/01/31",
+            "2026/12/31",
+            "2025/06/01",
+            "2024/02/29",
+        ]
+    })
+    _, profiles_valid = profile_dataset(df_valid)
+    findings_valid = analyze_validity(df_valid, profiles_valid)
+    assert not any(f.id.startswith("FND-VAL-DATE-FORMAT") for f in findings_valid)
+
+    # 2. Impossible calendar dates and non-date strings in a YYYY/MM/DD column must be flagged
+    df_invalid = pd.DataFrame({
+        "promotion_date": [
+            "2027/09/15",
+            "2026/01/31",
+            "2026/12/31",
+            "2025/06/01",
+            "2026/02/30",
+            "2026/13/01",
+            "2026/00/10",
+            "not-a-date",
+        ]
+    })
+    _, profiles_invalid = profile_dataset(df_invalid)
+    findings_invalid = analyze_validity(df_invalid, profiles_invalid)
+    date_findings = [f for f in findings_invalid if f.id == "FND-VAL-DATE-FORMAT-promotion_date"]
+    assert len(date_findings) == 1
+    assert date_findings[0].affected_row_count == 4

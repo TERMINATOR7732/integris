@@ -82,3 +82,49 @@ def test_profiler_constant_column() -> None:
     prof_map = {p.name: p for p in profiles}
     assert prof_map["constant_col"].is_constant_or_near_constant is True
     assert prof_map["varying_col"].is_constant_or_near_constant is False
+
+
+def test_profiler_identifier_semantic_classification_token_aware() -> None:
+    """Verify profiler classifies genuine high-cardinality identifiers without substring false positives."""
+    # 20 rows with 19 unique values -> unique_ratio = 0.95 (> 0.90, < 1.0)
+    vals = [f"VAL-{i}" for i in range(19)] + ["VAL-0"]
+
+    id_cols = [
+        "id",
+        "user_id",
+        "customer_id",
+        "record_id",
+        "uuid",
+        "user_uuid",
+        "identifier",
+        "primary_key",
+        "product_code",
+        "customer_code",
+        "lookup_key",
+        "userId",
+        "CustomerID",
+    ]
+    non_id_cols = [
+        "notes",
+        "normal",
+        "normal_status",
+        "number_of_items",
+        "notification",
+        "notification_text",
+        "country",
+        "status",
+        "country_code",
+        "status_code",
+        "region_code",
+    ]
+
+    data = {col: vals for col in id_cols + non_id_cols}
+    df = pd.DataFrame(data)
+    _, profiles = profile_dataset(df)
+    prof_map = {p.name: p for p in profiles}
+
+    for col in id_cols:
+        assert prof_map[col].semantic_type == SemanticType.IDENTIFIER, f"Expected {col} to be IDENTIFIER"
+
+    for col in non_id_cols:
+        assert prof_map[col].semantic_type != SemanticType.IDENTIFIER, f"Expected {col} NOT to be IDENTIFIER"

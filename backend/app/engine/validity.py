@@ -18,12 +18,13 @@ from app.models.report import (
     Severity,
 )
 
-# Common date regex patterns for format inference (supports ISO date and normalized datetime)
+# Common date regex patterns for format inference (supports ISO date, normalized datetime, and YYYY/MM/DD)
 DATE_PATTERNS = [
     (
         "ISO_8601",
         r"^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:[ T](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?)?$",
     ),
+    ("SLASH_YMD", r"^\d{4}/(?:0[1-9]|1[0-2])/(?:0[1-9]|[12]\d|3[01])$"),
     ("SLASH_DMY", r"^(?:0?[1-9]|[12]\d|3[01])/(?:0?[1-9]|1[0-2])/\d{4}$"),
     ("SLASH_MDY", r"^(?:0?[1-9]|1[0-2])/(?:0?[1-9]|[12]\d|3[01])/\d{2}$"),
     ("DOT_DMY", r"^(?:0?[1-9]|[12]\d|3[01])\.(?:0?[1-9]|1[0-2])\.\d{4}$"),
@@ -38,6 +39,12 @@ def _match_date_pattern(str_dates: pd.Series, pat_name: str, pat_regex: str) -> 
 
     if pat_name == "ISO_8601":
         valid_cal = pd.to_datetime(str_dates[matches], format="ISO8601", errors="coerce").notna()
+        result = matches.copy()
+        result.loc[matches] = valid_cal
+        return result
+
+    if pat_name == "SLASH_YMD":
+        valid_cal = pd.to_datetime(str_dates[matches], format="%Y/%m/%d", errors="coerce").notna()
         result = matches.copy()
         result.loc[matches] = valid_cal
         return result

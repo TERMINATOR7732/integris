@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from app.engine.sanitizer import sanitize_scalar
+from app.engine.uniqueness import _is_identifier_column
 from app.models.report import ColumnProfile, DatasetSummary, SemanticType
 
 
@@ -27,7 +28,6 @@ def _infer_semantic_type(series: pd.Series, col_name: str, total_rows: int) -> S
 
     unique_count = valid_series.nunique()
     unique_ratio = unique_count / valid_count if valid_count > 0 else 0.0
-    col_lower = col_name.lower().strip()
 
     # Check for Boolean
     if unique_count <= 2:
@@ -46,8 +46,7 @@ def _infer_semantic_type(series: pd.Series, col_name: str, total_rows: int) -> S
             return SemanticType.DATETIME
 
     # Check for Identifier (only strings or integers with near-zero nulls)
-    id_tokens = {"id", "uuid", "code", "key", "guid", "pk", "ident", "no", "num", "number"}
-    is_id_named = any(token in col_lower for token in id_tokens)
+    is_id_named = _is_identifier_column(col_name)
     is_not_float = not pd.api.types.is_float_dtype(series)
     low_nulls = (series.isna().sum() / total_rows) <= 0.05 if total_rows > 0 else True
 

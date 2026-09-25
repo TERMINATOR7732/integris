@@ -64,3 +64,29 @@ def test_consistency_token_aware_age_matching() -> None:
     assert "FND-CNS-NEG-shortage" not in neg_finding_ids
     assert "FND-CNS-NEG-leverage_ratio" not in neg_finding_ids
 
+
+def test_consistency_temporal_token_aware_matching() -> None:
+    """Verify genuine temporal pairs trigger findings while substring collisions (e.g. attendance_pct) do not."""
+    df = pd.DataFrame({
+        "hire_date": ["2022-05-01", "2023-06-15", "2021-01-10"],
+        "end_date": ["2024-01-01", "2022-01-01", "2023-12-31"],
+        "termination_date": ["2025-01-01", "2021-03-01", None],
+        "attendance_pct": [95.5, 88.2, 100.0],
+        "percentage": [12.0, 45.0, 78.0],
+        "attendant": ["2020-01-01", "2019-01-01", "2018-01-01"],
+        "ending_balance": [1000.0, 500.0, 250.0],
+        "trend": ["2020-01-01", "2019-01-01", "2018-01-01"],
+        "weekend_flag": [0, 1, 0],
+    })
+    _, profiles = profile_dataset(df)
+    findings = analyze_consistency(df, profiles)
+
+    temp_finding_ids = {f.id for f in findings if f.id.startswith("FND-CNS-TEMP-")}
+    assert "FND-CNS-TEMP-hire_date-end_date" in temp_finding_ids
+    assert "FND-CNS-TEMP-hire_date-termination_date" in temp_finding_ids
+
+    assert "FND-CNS-TEMP-hire_date-attendance_pct" not in temp_finding_ids
+    for f in findings:
+        if f.id.startswith("FND-CNS-TEMP-"):
+            for non_temp in ("attendance_pct", "percentage", "attendant", "ending_balance", "trend", "weekend_flag"):
+                assert non_temp not in f.affected_columns

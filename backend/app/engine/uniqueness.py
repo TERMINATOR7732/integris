@@ -59,6 +59,9 @@ def _is_identifier_column(col_name: str) -> bool:
     if "code" in token_set and (token_set & ENTITY_CODE_QUALIFIERS):
         return True
 
+    if (token_set & {"no", "num", "number"}) and (token_set & ENTITY_CODE_QUALIFIERS) and "of" not in token_set:
+        return True
+
     return False
 
 
