@@ -25,7 +25,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             if origin:
                 is_allowed = origin in settings.CORS_ORIGINS
                 if not is_allowed and settings.CORS_ORIGIN_REGEX:
-                    is_allowed = bool(re.match(settings.CORS_ORIGIN_REGEX, origin))
+                    is_allowed = bool(re.fullmatch(settings.CORS_ORIGIN_REGEX, origin))
                 if is_allowed or "*" in settings.CORS_ORIGINS:
                     headers["Access-Control-Allow-Origin"] = origin
                     headers["Access-Control-Allow-Credentials"] = "true"

@@ -69,6 +69,9 @@ export function ColumnDossiers({ columns, highlightColumn, onClearHighlight }: C
 
   const filteredColumns = useMemo(() => {
     return columns.filter((col) => {
+      if (highlightColumn && col.name !== highlightColumn) {
+        return false;
+      }
       if (selectedSemanticType !== 'all' && col.semantic_type !== selectedSemanticType) {
         return false;
       }
@@ -80,7 +83,7 @@ export function ColumnDossiers({ columns, highlightColumn, onClearHighlight }: C
       }
       return true;
     });
-  }, [columns, selectedSemanticType, searchQuery]);
+  }, [columns, selectedSemanticType, searchQuery, highlightColumn]);
 
   return (
     <div

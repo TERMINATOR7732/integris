@@ -283,7 +283,15 @@ export function FindingsExplorer({ findings, onSelectFinding, onSelectColumn }: 
           {filteredFindings.map((finding) => (
             <div
               key={finding.id}
+              role="button"
+              tabIndex={0}
               onClick={() => onSelectFinding(finding)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelectFinding(finding);
+                }
+              }}
               style={{
                 backgroundColor: 'rgba(15, 23, 42, 0.4)',
                 border: '1px solid #1e293b',

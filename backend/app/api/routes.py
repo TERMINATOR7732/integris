@@ -1,6 +1,7 @@
 """API route definitions for INTEGRIS."""
 
 from datetime import datetime, timezone
+from pathlib import PurePath
 from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
@@ -17,6 +18,17 @@ router = APIRouter()
 
 MAX_DATASET_ROWS = 500_000
 MAX_DATASET_COLUMNS = 1_000
+
+
+def _sanitize_upload_filename(raw_name: str | None) -> str:
+    """Normalize uploaded filename to its safe basename without path components."""
+    raw_filename = (raw_name or "").strip()
+    safe_filename = PurePath(raw_filename.replace("\\", "/")).name.strip()
+    if ":" in safe_filename:
+        safe_filename = safe_filename.split(":")[-1].strip()
+    if not safe_filename or safe_filename in {".", ".."}:
+        return "dataset.csv"
+    return safe_filename
 
 
 @router.get(
@@ -47,8 +59,8 @@ async def investigate_dataset(
     target_column: Annotated[str | None, Form(description="Optional target feature name for ML leakage analysis")] = None,
 ) -> ForensicDossier:
     """Ingest dataset stream into volatile memory, run forensic analyzers, and return Dossier."""
-    # 1. Validate file extension
-    filename = file.filename or "dataset.csv"
+    # 1. Sanitize filename to basename and validate file extension
+    filename = _sanitize_upload_filename(file.filename)
     ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext not in settings.ALLOWED_EXTENSIONS:
         raise HTTPException(

@@ -227,11 +227,20 @@ export function DatasetUploader({
       {/* Main Upload / Configuration Panel */}
       {!selectedFile ? (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Upload dataset file"
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}
           onDragOver={handleDrag}
           onDrop={handleDrop}
           onClick={() => inputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              inputRef.current?.click();
+            }
+          }}
           style={{
             position: 'relative',
             padding: '3.5rem 2rem',
@@ -417,6 +426,7 @@ export function DatasetUploader({
                 </select>
               ) : (
                 <input
+                  id="target-column-select"
                   type="text"
                   placeholder="e.g. attrition, fraud_flag, price"
                   value={targetColumn}

@@ -57,14 +57,7 @@ export function ExecutiveVerdictCard({ trustScore, findings }: ExecutiveVerdictC
         }}
       />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(220px, 280px) 1fr',
-          gap: '2rem',
-          alignItems: 'center',
-        }}
-      >
+      <div className="executive-verdict-grid">
         {/* Left: Score & Verdict Meter */}
         <div
           style={{

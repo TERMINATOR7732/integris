@@ -225,3 +225,54 @@ test('generateMarkdownReport handles pristine clean datasets gracefully', () => 
   assert.ok(md.includes('Zero integrity anomalies or relational contradictions detected'));
   assert.ok(md.includes('No corrective engineering actions required'));
 });
+
+test('Phase 9 UX & accessibility contracts are enforced across components', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const uploaderSrc = fs.readFileSync(
+    path.join(__dirname, '../components/upload/DatasetUploader.tsx'),
+    'utf-8'
+  );
+  const findingsSrc = fs.readFileSync(
+    path.join(__dirname, '../components/investigation/FindingsExplorer.tsx'),
+    'utf-8'
+  );
+  const verdictSrc = fs.readFileSync(
+    path.join(__dirname, '../components/investigation/ExecutiveVerdictCard.tsx'),
+    'utf-8'
+  );
+  const columnDossiersSrc = fs.readFileSync(
+    path.join(__dirname, '../components/investigation/ColumnDossiers.tsx'),
+    'utf-8'
+  );
+  const indexCssSrc = fs.readFileSync(path.join(__dirname, '../index.css'), 'utf-8');
+
+  // 6A & 6E: DatasetUploader dropzone keyboard accessibility + binary fallback input id
+  assert.ok(uploaderSrc.includes('role="button"'));
+  assert.ok(uploaderSrc.includes('tabIndex={0}'));
+  assert.ok(uploaderSrc.includes('aria-label="Upload dataset file"'));
+  assert.strictEqual(
+    (uploaderSrc.match(/id="target-column-select"/g) || []).length,
+    2,
+    'Both select and fallback text input must carry id="target-column-select"'
+  );
+
+  // 6B: FindingsExplorer keyboard accessibility
+  assert.ok(findingsSrc.includes('role="button"'));
+  assert.ok(findingsSrc.includes('tabIndex={0}'));
+  assert.ok(findingsSrc.includes("e.key === 'Enter' || e.key === ' '"));
+
+  // 6C: ExecutiveVerdictCard responsive mobile grid
+  assert.ok(verdictSrc.includes('className="executive-verdict-grid"'));
+  assert.ok(indexCssSrc.includes('.executive-verdict-grid'));
+  assert.ok(indexCssSrc.includes('@media (max-width: 640px)'));
+
+  // 6D: ColumnDossiers highlightColumn filter
+  assert.ok(columnDossiersSrc.includes('if (highlightColumn && col.name !== highlightColumn)'));
+  assert.ok(
+    columnDossiersSrc.includes('[columns, selectedSemanticType, searchQuery, highlightColumn]')
+  );
+});

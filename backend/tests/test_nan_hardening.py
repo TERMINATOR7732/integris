@@ -316,3 +316,123 @@ def test_unauthorized_origin_does_not_get_cors_header(monkeypatch):
 
     assert response.status_code == 500
     assert response.headers.get("access-control-allow-origin") is None
+
+
+@pytest.mark.parametrize(
+    "allowed_origin",
+    [
+        "https://integris-ten.vercel.app",
+        "https://integris-ten-git-main-terminator7732.vercel.app",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+)
+def test_cors_allows_authorized_origins_normal_and_500(monkeypatch, allowed_origin):
+    """Verify authorized origins receive Access-Control-Allow-Origin on both 200 and 500 responses."""
+    # Normal 200 request
+    res_ok = client.get("/api/v1/health", headers={"Origin": allowed_origin})
+    assert res_ok.status_code == 200
+    assert res_ok.headers.get("access-control-allow-origin") == allowed_origin
+
+    # 500 error path via ErrorHandlerMiddleware
+    def mock_broken_pipeline(*args, **kwargs):
+        raise RuntimeError("Simulated crash")
+
+    from app.api import routes
+    monkeypatch.setattr(routes, "run_forensic_pipeline", mock_broken_pipeline)
+
+    res_err = client.post(
+        "/api/v1/investigate",
+        files={"file": ("test.csv", b"a,b\n1,2\n", "text/csv")},
+        headers={"Origin": allowed_origin},
+    )
+    assert res_err.status_code == 500
+    assert res_err.headers.get("access-control-allow-origin") == allowed_origin
+
+
+@pytest.mark.parametrize(
+    "rejected_origin",
+    [
+        "https://integris-ten.vercel.app.evil.com",
+        "https://evil.vercel.app",
+        "https://example.com",
+    ],
+)
+def test_cors_rejects_spoofed_and_foreign_origins_normal_and_500(monkeypatch, rejected_origin):
+    """Verify spoofed suffix domains and arbitrary Vercel apps are rejected on both 200 and 500 paths."""
+    # Normal 200 request
+    res_ok = client.get("/api/v1/health", headers={"Origin": rejected_origin})
+    assert res_ok.status_code == 200
+    assert res_ok.headers.get("access-control-allow-origin") is None
+
+    # 500 error path via ErrorHandlerMiddleware
+    def mock_broken_pipeline(*args, **kwargs):
+        raise RuntimeError("Simulated crash")
+
+    from app.api import routes
+    monkeypatch.setattr(routes, "run_forensic_pipeline", mock_broken_pipeline)
+
+    res_err = client.post(
+        "/api/v1/investigate",
+        files={"file": ("test.csv", b"a,b\n1,2\n", "text/csv")},
+        headers={"Origin": rejected_origin},
+    )
+    assert res_err.status_code == 500
+    assert res_err.headers.get("access-control-allow-origin") is None
+
+
+@pytest.mark.parametrize(
+    "raw_filename,expected_basename",
+    [
+        ("../../etc/passwd.csv", "passwd.csv"),
+        ("/tmp/data.csv", "data.csv"),
+        (r"C:\Users\Admin\secret.csv", "secret.csv"),
+        ("normal.csv", "normal.csv"),
+        ("../../../dataset.csv", "dataset.csv"),
+    ],
+)
+def test_uploaded_filename_sanitization_e2e_csv(raw_filename, expected_basename):
+    """Verify path traversal and absolute paths in uploaded CSV filenames are stripped to basename."""
+    csv_bytes = b"id,value\n1,10\n2,20\n3,30\n"
+    response = client.post(
+        "/api/v1/investigate",
+        files={"file": (raw_filename, csv_bytes, "text/csv")},
+    )
+    assert response.status_code == 200, f"Unexpected status: {response.text}"
+    data = response.json()
+    assert data["metadata"]["file_name"] == expected_basename
+    assert "/" not in data["metadata"]["file_name"]
+    assert "\\" not in data["metadata"]["file_name"]
+    assert ".." not in data["metadata"]["file_name"]
+
+
+def test_uploaded_filename_sanitization_xlsx_and_fallbacks():
+    """Verify Windows traversal on XLSX and empty/dot fallback filenames."""
+    from app.api.routes import _sanitize_upload_filename
+
+    assert _sanitize_upload_filename(r"..\..\secret.xlsx") == "secret.xlsx"
+    assert _sanitize_upload_filename("") == "dataset.csv"
+    assert _sanitize_upload_filename(None) == "dataset.csv"
+    assert _sanitize_upload_filename("..") == "dataset.csv"
+    assert _sanitize_upload_filename("../../") == "dataset.csv"
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["id", "amount"])
+    ws.append([1, 100])
+    ws.append([2, 200])
+    bio = io.BytesIO()
+    wb.save(bio)
+
+    response = client.post(
+        "/api/v1/investigate",
+        files={
+            "file": (
+                r"..\..\secret.xlsx",
+                bio.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert response.status_code == 200, f"Unexpected status: {response.text}"
+    assert response.json()["metadata"]["file_name"] == "secret.xlsx"

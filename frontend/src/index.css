@@ -93,9 +93,24 @@ body {
 }
 
 /* Focus styles */
-button:focus-visible, input:focus-visible, select:focus-visible {
+button:focus-visible, input:focus-visible, select:focus-visible, [role="button"]:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
+}
+
+/* Executive Verdict responsive grid */
+.executive-verdict-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 2rem;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .executive-verdict-grid {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
 }
 
 /* Scrollbars */

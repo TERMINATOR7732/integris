@@ -10,10 +10,10 @@
 [![Tailwind CSS v4](https://img.shields.io/badge/Tailwind_CSS-v4.0-38B2AC.svg)](https://tailwindcss.com/)
 [![Tests Passing](https://img.shields.io/badge/Tests-100%25_Passing-brightgreen.svg)]()
 [![Live App](https://img.shields.io/badge/Live_App-integris--ten.vercel.app-000000.svg?logo=vercel)](https://integris-ten.vercel.app)
-[![API Status](https://img.shields.io/badge/API-integris--api.vercel.app-009688.svg)](https://integris-api.vercel.app/api/v1/health)
+[![API Status](https://img.shields.io/badge/API-integris--sp5o.onrender.com-009688.svg)](https://integris-sp5o.onrender.com/api/v1/health)
 
 **Live Production Application:** [https://integris-ten.vercel.app](https://integris-ten.vercel.app)  
-**Production Forensic API:** [https://integris-api.vercel.app](https://integris-api.vercel.app) (`/api/v1/health`)  
+**Production Forensic API:** [https://integris-sp5o.onrender.com](https://integris-sp5o.onrender.com) (`/api/v1/health`)
 **GitHub Repository:** [https://github.com/TERMINATOR7732/integris](https://github.com/TERMINATOR7732/integris)
 
 INTEGRIS is a deterministic data integrity and forensic investigation platform designed to evaluate whether a tabular dataset can reasonably be trusted before it is committed to production analytics, executive decision-making, regulatory reporting, or machine learning pipelines.
@@ -239,9 +239,10 @@ npm run dev
 Checks engine readiness, system status, and active version.
 ```json
 {
-  "status": "operational",
+  "status": "healthy",
+  "service": "INTEGRIS Forensic Engine",
   "version": "0.1.0",
-  "engine": "active"
+  "engine_status": "ready"
 }
 ```
 
