@@ -169,3 +169,13 @@ def test_validity_slash_ymd_date_support() -> None:
     date_findings = [f for f in findings_invalid if f.id == "FND-VAL-DATE-FORMAT-promotion_date"]
     assert len(date_findings) == 1
     assert date_findings[0].affected_row_count == 4
+
+
+def test_validity_non_date_time_substring_ignored() -> None:
+    """Columns with 'time' as a substring (e.g. 'overtime_notes') should not trigger date format findings."""
+    df = pd.DataFrame({
+        "overtime_notes": ["2026-01-01"] + [f"regular shift note {i}" for i in range(19)],
+    })
+    _, profiles = profile_dataset(df)
+    findings = analyze_validity(df, profiles)
+    assert not any(f.id.startswith("FND-VAL-DATE-FORMAT") for f in findings)

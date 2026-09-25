@@ -9,14 +9,22 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from app.engine.uniqueness import _tokenize_column_name
 from app.models.report import (
     ColumnProfile,
     Evidence,
     Finding,
     FindingCategory,
     Recommendation,
+    SemanticType,
     Severity,
 )
+
+DATE_NAME_TOKENS = {
+    "date", "dates", "time", "datetime", "timestamp", "dt",
+    "hire", "hired", "exit", "exited", "birth", "birthdate", "dob",
+    "created", "updated", "termination", "promotion",
+}
 
 # Common date regex patterns for format inference (supports ISO date, normalized datetime, and YYYY/MM/DD)
 DATE_PATTERNS = [
@@ -81,6 +89,8 @@ def analyze_validity(
     if total_rows == 0:
         return findings
 
+    col_profile_map = {p.name: p for p in column_profiles}
+
     for col in df.columns:
         col_str = str(col)
         series = df[col]
@@ -89,9 +99,12 @@ def analyze_validity(
         if non_null_count < 3:
             continue
 
+        is_str_or_obj = series.dtype == object or isinstance(series.dtype, pd.StringDtype)
+        stripped_str = non_null_series.astype(str).str.strip() if is_str_or_obj else None
+
         # 1. Type Drift in Object Columns (Predominantly Numeric with Contaminated Strings)
-        if series.dtype == object or isinstance(series.dtype, pd.StringDtype):
-            coerced_numeric = pd.to_numeric(non_null_series.astype(str).str.strip(), errors="coerce")
+        if is_str_or_obj and stripped_str is not None:
+            coerced_numeric = pd.to_numeric(stripped_str, errors="coerce")
             numeric_mask = coerced_numeric.notna() & np.isfinite(coerced_numeric)
             numeric_count = int(numeric_mask.sum())
             numeric_ratio = numeric_count / non_null_count
@@ -139,11 +152,13 @@ def analyze_validity(
                 )
 
         # 2. Date Format Inconsistencies
-        # Check columns with date in name or sampled date patterns
-        col_lower = col_str.lower()
-        is_date_named = any(tok in col_lower for tok in ["date", "time", "hire", "exit", "birth", "dob", "created", "updated"])
-        if is_date_named and (series.dtype == object or isinstance(series.dtype, pd.StringDtype)):
-            str_dates = non_null_series.astype(str).str.strip()
+        # Check columns with date tokens in name or datetime semantic profile
+        profile = col_profile_map.get(col_str)
+        is_date_named = bool(set(_tokenize_column_name(col_str)) & DATE_NAME_TOKENS) or (
+            profile is not None and profile.semantic_type == SemanticType.DATETIME
+        )
+        if is_date_named and is_str_or_obj and stripped_str is not None:
+            str_dates = stripped_str
             pattern_counts: dict[str, int] = {}
             pattern_masks: dict[str, pd.Series] = {}
             for pat_name, pat_regex in DATE_PATTERNS:
@@ -153,7 +168,11 @@ def analyze_validity(
                     pattern_counts[pat_name] = count
                     pattern_masks[pat_name] = matches
 
-            if len(pattern_counts) > 1 or (len(pattern_counts) == 1 and sum(pattern_counts.values()) < non_null_count):
+            total_date_matches = sum(pattern_counts.values())
+            if (
+                len(pattern_counts) > 1
+                or (len(pattern_counts) == 1 and total_date_matches < non_null_count)
+            ) and (total_date_matches >= 2 or (total_date_matches / non_null_count) >= 0.20):
                 # Dominant format vs anomalies
                 sorted_patterns = sorted(pattern_counts.items(), key=lambda x: x[1], reverse=True)
                 dominant_pattern, dominant_count = sorted_patterns[0] if sorted_patterns else ("UNKNOWN", 0)

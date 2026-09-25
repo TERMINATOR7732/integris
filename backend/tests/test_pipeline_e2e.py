@@ -160,3 +160,50 @@ def test_api_investigate_invalid_target_column() -> None:
         )
     assert response.status_code == 422
     assert "does not exist" in response.json()["detail"]
+
+
+def test_pipeline_empty_single_row_and_duplicate_columns() -> None:
+    """Verify pipeline safely handles empty DataFrames, 1-row DataFrames, and duplicate column names."""
+    # Empty DataFrame (0 rows)
+    df_empty = pd.DataFrame({"id": pd.Series(dtype="object"), "val": pd.Series(dtype="float64")})
+    dossier_empty = run_forensic_pipeline(df_empty, file_name="empty.csv")
+    assert dossier_empty.metadata.row_count == 0
+    assert dossier_empty.trust_score.overall_score == 100.0
+    assert len(dossier_empty.findings) == 0
+
+    # Single-row DataFrame
+    df_one = pd.DataFrame({"employee_id": ["EMP-1"], "salary": [75000.0], "is_active": [True]})
+    dossier_one = run_forensic_pipeline(df_one, file_name="single.csv")
+    assert dossier_one.metadata.row_count == 1
+    assert dossier_one.trust_score.overall_score == 100.0
+
+    # Duplicate column names with duplicate rows and non-zero index
+    df_dup = pd.DataFrame(
+        [["EMP-1", 10, 20], ["EMP-1", 10, 20], ["EMP-2", 30, 40]],
+        columns=["employee_id", "metric", "metric"],
+        index=[5, 10, 15],
+    )
+    dossier_dup = run_forensic_pipeline(df_dup, file_name="dup_cols.csv")
+    assert [c.name for c in dossier_dup.columns] == ["employee_id", "metric", "metric_1"]
+    assert any(f.id == "FND-UNQ-EXACT-DUPS" for f in dossier_dup.findings)
+
+
+def test_pipeline_deterministic_repeatability() -> None:
+    """Verify repeated executions on the same dataset produce identical findings, scores, and ordering."""
+    df = pd.read_csv(CORRUPTED_CSV_PATH)
+    runs = [
+        run_forensic_pipeline(df=df, file_name="corrupted_forensic.csv", target_column="attrition")
+        for _ in range(3)
+    ]
+    baseline = runs[0]
+    for r in runs[1:]:
+        assert r.metadata.row_count == baseline.metadata.row_count
+        assert r.metadata.column_count == baseline.metadata.column_count
+        assert r.trust_score.overall_score == baseline.trust_score.overall_score
+        assert r.trust_score.verdict == baseline.trust_score.verdict
+        assert r.trust_score.grade == baseline.trust_score.grade
+        assert [f.id for f in r.findings] == [f.id for f in baseline.findings]
+        assert [f.severity for f in r.findings] == [f.severity for f in baseline.findings]
+        assert [f.evidence[0].sample_row_indices for f in r.findings] == [
+            f.evidence[0].sample_row_indices for f in baseline.findings
+        ]

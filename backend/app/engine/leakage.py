@@ -99,6 +99,8 @@ def analyze_leakage(
         # 2. Extreme Numeric Correlation (Pearson & Spearman)
         if is_target_numeric and pd.api.types.is_numeric_dtype(series):
             valid_num = df[[col, target_column]].dropna()
+            if len(valid_num) > 0:
+                valid_num = valid_num[np.isfinite(valid_num[col]) & np.isfinite(valid_num[target_column])]
             if len(valid_num) >= 10:
                 try:
                     r_p_calc, _ = stats.pearsonr(valid_num[col], valid_num[target_column])

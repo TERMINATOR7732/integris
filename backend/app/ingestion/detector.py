@@ -30,12 +30,10 @@ def detect_file_type(filename: str, content: bytes) -> str:
         return "xls"
 
     # Extension-based mapping for text-based formats
-    if ext == ".csv":
-        return "csv"
-    elif ext == ".tsv":
-        return "tsv"
-    elif ext == ".txt":
-        return "txt"
+    if ext in (".csv", ".tsv", ".txt"):
+        if b"\x00" in content[:8192] and not content.startswith((b"\xff\xfe", b"\xfe\xff")):
+            raise ValueError(f"File with extension '{ext}' contains binary null-byte data and is not valid text.")
+        return ext.lstrip(".")
     elif ext == ".xlsx":
         # Missing zip header for xlsx
         raise ValueError("Invalid .xlsx file: missing OpenXML zip archive signature.")

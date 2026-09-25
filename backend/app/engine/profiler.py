@@ -19,41 +19,82 @@ def _sanitize_scalar(val: Any) -> Any:
     return sanitize_scalar(val)
 
 
-def _infer_semantic_type(series: pd.Series, col_name: str, total_rows: int) -> SemanticType:
+def _deduplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure DataFrame column names are non-empty unique strings without mutating caller input."""
+    raw_cols = [str(c).strip() if c is not None and str(c).strip() else f"col_{i+1}" for i, c in enumerate(df.columns)]
+    if list(df.columns) == raw_cols and not df.columns.duplicated().any():
+        return df
+
+    unique_cols: list[str] = []
+    counts: dict[str, int] = {}
+    for c in raw_cols:
+        if c in counts:
+            counts[c] += 1
+            unique_cols.append(f"{c}_{counts[c]}")
+        else:
+            counts[c] = 0
+            unique_cols.append(c)
+
+    df_copy = df.copy()
+    df_copy.columns = unique_cols
+    return df_copy
+
+
+def _infer_semantic_type(
+    series: pd.Series,
+    col_name: str,
+    total_rows: int,
+    valid_series: pd.Series | None = None,
+    unique_vals: np.ndarray | Any | None = None,
+) -> SemanticType:
     """Determine the functional semantic role of a column."""
-    valid_series = series.dropna()
+    if valid_series is None:
+        valid_series = series.dropna()
     valid_count = len(valid_series)
     if valid_count == 0:
         return SemanticType.UNKNOWN
 
-    unique_count = valid_series.nunique()
+    if unique_vals is None:
+        unique_vals = valid_series.unique()
+    unique_count = len(unique_vals)
     unique_ratio = unique_count / valid_count if valid_count > 0 else 0.0
 
     # Check for Boolean
     if unique_count <= 2:
-        distinct_vals = set(valid_series.astype(str).str.lower().unique())
+        distinct_vals = {str(v).lower() for v in unique_vals}
         if distinct_vals.issubset({"true", "false", "0", "1", "yes", "no", "t", "f"}):
             return SemanticType.BOOLEAN
 
     # Check for Datetime
     if pd.api.types.is_datetime64_any_dtype(series):
         return SemanticType.DATETIME
-    if pd.api.types.is_string_dtype(series) or series.dtype == object:
+    is_str_or_obj = pd.api.types.is_string_dtype(series) or series.dtype == object
+    if is_str_or_obj:
         # Sample check for date format strings
         sample_str = valid_series.astype(str).head(20)
         date_like = sample_str.str.match(r"^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$")
         if date_like.sum() >= min(3, len(sample_str)) and date_like.mean() > 0.6:
             return SemanticType.DATETIME
 
+    # Pre-compute string length / prose characteristics on a bounded sample for string columns
+    avg_len = 0.0
+    is_prose_like = False
+    if is_str_or_obj or isinstance(series.dtype, pd.CategoricalDtype):
+        str_sample = pd.Series(unique_vals[:200]).astype(str)
+        avg_len = float(str_sample.str.len().mean()) if len(str_sample) > 0 else 0.0
+        avg_spaces = float(str_sample.str.count(" ").mean()) if len(str_sample) > 0 else 0.0
+        is_prose_like = avg_len > 60 or avg_spaces >= 2.0
+
     # Check for Identifier (only strings or integers with near-zero nulls)
     is_id_named = _is_identifier_column(col_name)
     is_not_float = not pd.api.types.is_float_dtype(series)
-    low_nulls = (series.isna().sum() / total_rows) <= 0.05 if total_rows > 0 else True
+    null_count = total_rows - valid_count
+    low_nulls = (null_count / total_rows) <= 0.05 if total_rows > 0 else True
 
-    if is_not_float and low_nulls and total_rows >= 5:
-        if is_id_named and (unique_ratio > 0.90 or unique_count == total_rows):
+    if is_not_float and low_nulls:
+        if is_id_named and (unique_ratio > 0.90 or unique_count == total_rows) and avg_len <= 60:
             return SemanticType.IDENTIFIER
-        if unique_ratio == 1.0 and valid_count >= (total_rows * 0.95):
+        if total_rows >= 5 and unique_ratio == 1.0 and valid_count >= (total_rows * 0.95) and not is_prose_like:
             return SemanticType.IDENTIFIER
 
     # Check Numeric
@@ -67,9 +108,8 @@ def _infer_semantic_type(series: pd.Series, col_name: str, total_rows: int) -> S
         return SemanticType.NUMERIC_DISCRETE
 
     # Categorical vs Free Text
-    if pd.api.types.is_string_dtype(series) or series.dtype == object or isinstance(series.dtype, pd.CategoricalDtype):
-        avg_len = valid_series.astype(str).str.len().mean()
-        if avg_len > 60:
+    if is_str_or_obj or isinstance(series.dtype, pd.CategoricalDtype):
+        if avg_len > 60 or (is_prose_like and unique_ratio > 0.50):
             return SemanticType.FREE_TEXT
         if unique_ratio < 0.20 or unique_count <= 50:
             return SemanticType.CATEGORICAL
@@ -87,6 +127,7 @@ def profile_dataset(df: pd.DataFrame) -> tuple[DatasetSummary, list[ColumnProfil
     Returns:
         tuple of (DatasetSummary, list of ColumnProfile)
     """
+    df = _deduplicate_columns(df)
     row_count = len(df)
     col_count = len(df.columns)
     total_cells = row_count * col_count
@@ -110,14 +151,18 @@ def profile_dataset(df: pd.DataFrame) -> tuple[DatasetSummary, list[ColumnProfil
 
     for col in df.columns:
         series = df[col]
-        non_null_count = int(series.notna().sum())
-        null_count = int(series.isna().sum())
+        valid_series = series.dropna()
+        non_null_count = len(valid_series)
+        null_count = row_count - non_null_count
         null_ratio = float(null_count / row_count) if row_count > 0 else 0.0
-        unique_count = int(series.nunique(dropna=True))
+        unique_vals = valid_series.unique()
+        unique_count = len(unique_vals)
         unique_ratio = float(unique_count / non_null_count) if non_null_count > 0 else 0.0
         col_memory = int(series.memory_usage(deep=True))
 
-        semantic_type = _infer_semantic_type(series, str(col), row_count)
+        semantic_type = _infer_semantic_type(
+            series, str(col), row_count, valid_series=valid_series, unique_vals=unique_vals
+        )
 
         # Statistical summary where applicable
         min_val = None
@@ -127,8 +172,7 @@ def profile_dataset(df: pd.DataFrame) -> tuple[DatasetSummary, list[ColumnProfil
         std_val = None
 
         if pd.api.types.is_numeric_dtype(series) and non_null_count > 0:
-            numeric_valid = series.dropna()
-            numeric_finite = numeric_valid[np.isfinite(numeric_valid)]
+            numeric_finite = valid_series[np.isfinite(valid_series)]
             finite_count = len(numeric_finite)
             try:
                 min_val = _sanitize_scalar(numeric_finite.min()) if finite_count > 0 else None
@@ -146,7 +190,13 @@ def profile_dataset(df: pd.DataFrame) -> tuple[DatasetSummary, list[ColumnProfil
 
         # Identifier & constant flags
         is_candidate_id = False
-        if unique_count == row_count and row_count > 1 and null_count == 0 and not pd.api.types.is_float_dtype(series):
+        if (
+            unique_count == row_count
+            and row_count > 1
+            and null_count == 0
+            and not pd.api.types.is_float_dtype(series)
+            and semantic_type != SemanticType.FREE_TEXT
+        ):
             is_candidate_id = True
         elif semantic_type == SemanticType.IDENTIFIER and unique_ratio > 0.95 and null_ratio <= 0.05:
             is_candidate_id = True
@@ -158,7 +208,7 @@ def profile_dataset(df: pd.DataFrame) -> tuple[DatasetSummary, list[ColumnProfil
         # Representative sanitized sample values (up to 5 distinct non-null)
         sample_vals = [
             _sanitize_scalar(val)
-            for val in series.dropna().unique()[:5]
+            for val in unique_vals[:5]
         ]
 
         profile = ColumnProfile(

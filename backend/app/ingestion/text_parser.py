@@ -8,7 +8,7 @@ import pandas as pd
 def parse_txt(content: bytes) -> pd.DataFrame:
     """Parse TXT file into a tabular DataFrame or reject unstructured prose."""
     try:
-        text_sample = content[:4096].decode("utf-8", errors="replace")
+        text_sample = content[:4096].decode("utf-8-sig", errors="replace")
     except Exception as e:
         raise ValueError("This TXT file cannot be decoded as text.") from e
 
@@ -44,7 +44,7 @@ def parse_txt(content: bytes) -> pd.DataFrame:
         df = pd.read_csv(
             io.BytesIO(content),
             sep=delimiter,
-            encoding="utf-8",
+            encoding="utf-8-sig",
             encoding_errors="replace",
             low_memory=False,
         )

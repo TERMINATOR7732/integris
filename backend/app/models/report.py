@@ -7,7 +7,22 @@ quantified evidence chains, Trust Score attribution, and the complete Forensic D
 import math
 from enum import Enum
 from typing import Any
+import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _clean_non_finite(val: Any) -> Any:
+    """Recursively replace non-finite float/numpy scalars with None."""
+    if val is None:
+        return None
+    if isinstance(val, (float, np.floating)):
+        f_val = float(val)
+        return None if (math.isnan(f_val) or math.isinf(f_val)) else f_val
+    if isinstance(val, list):
+        return [_clean_non_finite(item) for item in val]
+    if isinstance(val, dict):
+        return {k: _clean_non_finite(v) for k, v in val.items()}
+    return val
 
 
 class Severity(str, Enum):
@@ -110,24 +125,14 @@ class ColumnProfile(BaseModel):
     @field_validator("min_value", "max_value", "mean", "median", "std_dev", "null_ratio", "unique_ratio", mode="before")
     @classmethod
     def _sanitize_numeric_fields(cls, v: Any) -> Any:
-        if v is None:
-            return None
-        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-            return None
-        return v
+        return _clean_non_finite(v)
 
     @field_validator("sample_values", mode="before")
     @classmethod
     def _sanitize_sample_values(cls, values: list[Any]) -> list[Any]:
         if not values:
             return []
-        cleaned = []
-        for val in values:
-            if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
-                cleaned.append(None)
-            else:
-                cleaned.append(val)
-        return cleaned
+        return _clean_non_finite(values)
 
 
 class Evidence(BaseModel):
@@ -143,26 +148,14 @@ class Evidence(BaseModel):
     @field_validator("observed_value", "threshold_or_expected", mode="before")
     @classmethod
     def _sanitize_evidence_scalars(cls, v: Any) -> Any:
-        if v is None:
-            return None
-        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-            return None
-        if isinstance(v, list):
-            return [None if (isinstance(item, float) and (math.isnan(item) or math.isinf(item))) else item for item in v]
-        return v
+        return _clean_non_finite(v)
 
     @field_validator("sample_values", mode="before")
     @classmethod
     def _sanitize_evidence_samples(cls, values: list[Any]) -> list[Any]:
         if not values:
             return []
-        cleaned = []
-        for val in values:
-            if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
-                cleaned.append(None)
-            else:
-                cleaned.append(val)
-        return cleaned
+        return _clean_non_finite(values)
 
 
 class Recommendation(BaseModel):

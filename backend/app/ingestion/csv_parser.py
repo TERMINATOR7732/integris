@@ -10,7 +10,7 @@ def parse_csv(content: bytes) -> pd.DataFrame:
 
     Preserves exact sniff-and-parse behavior required for the forensic stress baseline.
     """
-    sample_chunk = content[:4096].decode("utf-8", errors="replace")
+    sample_chunk = content[:4096].decode("utf-8-sig", errors="replace")
     sniffer = csv.Sniffer()
     try:
         detected_dialect = sniffer.sniff(sample_chunk, delimiters=[",", "\t", ";", "|"])
@@ -21,7 +21,7 @@ def parse_csv(content: bytes) -> pd.DataFrame:
     df = pd.read_csv(
         io.BytesIO(content),
         sep=delimiter,
-        encoding="utf-8",
+        encoding="utf-8-sig",
         encoding_errors="replace",
         low_memory=False,
     )

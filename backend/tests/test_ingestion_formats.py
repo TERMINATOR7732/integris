@@ -415,3 +415,85 @@ def test_api_investigate_size_limit_pdf():
     )
     assert response.status_code == 413
     assert "exceeds the maximum allowed limit of 15 mb" in response.json()["detail"].lower()
+
+
+def test_parse_csv_and_txt_utf8_bom():
+    """Ensure UTF-8 BOM is cleanly stripped from the first column header in CSV and TXT."""
+    bom_csv = b"\xef\xbb\xbfemployee_id,department,salary\nE1,Sales,50000\nE2,IT,60000"
+    df_csv = parse_csv(bom_csv)
+    assert list(df_csv.columns) == ["employee_id", "department", "salary"]
+
+    df_txt = parse_txt(bom_csv)
+    assert list(df_txt.columns) == ["employee_id", "department", "salary"]
+
+
+def test_detect_file_type_rejects_binary_null_bytes_in_text():
+    """Ensure binary streams containing null bytes cannot masquerade as .csv, .tsv, or .txt."""
+    binary_payload = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00"
+    with pytest.raises(ValueError, match="binary null-byte"):
+        detect_file_type("fake.csv", binary_payload)
+    with pytest.raises(ValueError, match="binary null-byte"):
+        detect_file_type("fake.txt", binary_payload)
+
+
+def test_parse_excel_zip_bomb_and_duplicate_headers(monkeypatch):
+    """Verify XLSX zip-bomb uncompressed size limit and duplicate header deduplication after blank rows."""
+    import app.ingestion.excel_parser as excel_mod
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Audit"
+    ws.append(["user_id", "score", "score "])  # Duplicate header after .strip()
+    ws.append([None, None, None])  # Blank row between header and data
+    ws.append(["U1", 10, 20])
+    ws.append(["U1", 10, 20])  # Exact duplicate row after dropped blank row
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    xlsx_bytes = bio.getvalue()
+
+    df, sheet, _ = parse_excel(xlsx_bytes, "xlsx")
+    assert sheet == "Audit"
+    assert list(df.columns) == ["user_id", "score", "score_1"]
+    assert list(df.index) == [0, 1]
+
+    # Verify zip-bomb limit triggers before openpyxl parses
+    monkeypatch.setattr(excel_mod, "MAX_EXCEL_UNCOMPRESSED_BYTES", 100)
+    with pytest.raises(ValueError, match="decompression bomb"):
+        parse_excel(xlsx_bytes, "xlsx")
+
+
+def test_parse_pdf_incompatible_page_schema_skipped(monkeypatch):
+    """Ensure PDF pages with incompatible column counts do not corrupt the primary table."""
+    page1_table = [
+        ["employee_id", "department"],
+        ["EMP-01", "Engineering"],
+        ["EMP-02", "Finance"],
+    ]
+    page2_incompatible_table = [
+        ["summary_metric", "q1", "q2", "q3"],
+        ["Revenue", "100", "200", "300"],
+        ["Cost", "50", "60", "70"],
+    ]
+
+    class DummyPage:
+        def __init__(self, tables):
+            self._tables = tables
+        def extract_tables(self):
+            return self._tables
+
+    class DummyPDF:
+        def __init__(self):
+            self.pages = [DummyPage([page1_table]), DummyPage([page2_incompatible_table])]
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    import pdfplumber
+    monkeypatch.setattr(pdfplumber, "open", lambda _: DummyPDF())
+
+    df, page_count, _ = parse_pdf(b"%PDF-1.4 dummy")
+    assert page_count == 2
+    assert list(df.columns) == ["employee_id", "department"]
+    assert len(df) == 2

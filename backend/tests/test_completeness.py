@@ -72,3 +72,25 @@ def test_completeness_co_missingness() -> None:
     assert len(co_miss) > 0
     assert "col_a" in co_miss[0].affected_columns
     assert "col_b" in co_miss[0].affected_columns
+
+
+def test_completeness_token_aware_lifecycle_and_non_range_index() -> None:
+    """Ensure 'payment_terms' is not downgraded as a lifecycle column and non-RangeIndex does not crash."""
+    df = pd.DataFrame(
+        {
+            "termination_date": [None] * 6 + ["2025-01-01"] * 5,
+            "payment_terms": [None] * 6 + ["Net 30"] * 5,
+            "score_with_inf": [10.0, 12.0, 11.0, 13.0, 14.0, 15.0, 11.0, 12.0, 13.5, np.inf, -999.0],
+        },
+        index=[10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110],
+    )
+    _, profiles = profile_dataset(df)
+    findings = analyze_completeness(df, profiles)
+    fnd_map = {f.id: f for f in findings}
+
+    # termination_date is an optional lifecycle milestone -> INFO at >= 50% missing
+    assert fnd_map["FND-CMP-MISS-termination_date"].severity == Severity.INFO
+    # payment_terms is NOT a lifecycle milestone -> HIGH at >= 50% missing
+    assert fnd_map["FND-CMP-MISS-payment_terms"].severity == Severity.HIGH
+    assert fnd_map["FND-CMP-MISS-payment_terms"].evidence[0].sample_row_indices == [10, 20, 30, 40, 50, 60]
+    assert "FND-CMP-SENT-NUM-score_with_inf--999" in fnd_map

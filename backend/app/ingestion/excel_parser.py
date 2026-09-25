@@ -2,7 +2,10 @@
 
 from datetime import date, datetime
 import io
+import zipfile
 import pandas as pd
+
+MAX_EXCEL_UNCOMPRESSED_BYTES = 250 * 1024 * 1024
 
 
 def _normalize_excel_datetime_cell(val: object) -> object:
@@ -25,6 +28,19 @@ def parse_excel(content: bytes, file_type: str) -> tuple[pd.DataFrame, str, list
     Raises:
         ValueError if the file is invalid, corrupted, or has no tabular records.
     """
+    if file_type == "xlsx":
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                total_uncompressed = sum(info.file_size for info in zf.infolist())
+                if total_uncompressed > MAX_EXCEL_UNCOMPRESSED_BYTES:
+                    raise ValueError(
+                        "Excel archive uncompressed size exceeds safety limits (potential decompression bomb)."
+                    )
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Unable to read Excel file ({file_type}): {str(e)}") from e
+
     engine = "openpyxl" if file_type == "xlsx" else "xlrd"
     bio = io.BytesIO(content)
 
@@ -47,11 +63,24 @@ def parse_excel(content: bytes, file_type: str) -> tuple[pd.DataFrame, str, list
             continue
 
         # Strip completely empty rows and columns
-        df = df.dropna(how="all").dropna(axis=1, how="all")
+        df = df.dropna(how="all").dropna(axis=1, how="all").reset_index(drop=True)
         if not df.empty and len(df.columns) > 0 and len(df) > 0:
             selected_sheet = sheet
-            # Clean headers: convert all column names to string and strip
-            df.columns = [str(c).strip() for c in df.columns]
+            # Clean and deduplicate headers
+            raw_headers = [
+                str(c).strip() if c is not None and str(c).strip() else f"col_{i+1}"
+                for i, c in enumerate(df.columns)
+            ]
+            unique_headers: list[str] = []
+            counts: dict[str, int] = {}
+            for h in raw_headers:
+                if h in counts:
+                    counts[h] += 1
+                    unique_headers.append(f"{h}_{counts[h]}")
+                else:
+                    counts[h] = 0
+                    unique_headers.append(h)
+            df.columns = unique_headers
             df_result = df
             break
 

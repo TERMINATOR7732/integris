@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from app.engine.uniqueness import _tokenize_column_name
 from app.models.report import (
     ColumnProfile,
     Evidence,
@@ -25,6 +26,25 @@ TEXT_SENTINELS = {
 
 # Numeric sentinel values commonly used as missing value placeholders
 NUMERIC_SENTINELS = {-999, -9999, 9999, 99999, 999999, -1}
+
+OPTIONAL_LIFECYCLE_TOKENS = {
+    "exit", "exited", "termination", "terminated", "cancel", "cancelled",
+    "canceled", "cancellation", "dropout", "resign", "resigned", "offboard", "offboarded",
+}
+
+
+def _is_optional_lifecycle_column(col_name: str) -> bool:
+    """Return True if column represents an optional lifecycle milestone (e.g. termination_date, exit_date)."""
+    token_set = set(_tokenize_column_name(col_name))
+    if not token_set:
+        return False
+    if token_set & OPTIONAL_LIFECYCLE_TOKENS:
+        return True
+    if ("term" in token_set or "end" in token_set or "leave" in token_set) and (
+        token_set & {"date", "dates", "dt", "time", "timestamp", "datetime"}
+    ):
+        return True
+    return False
 
 
 def analyze_completeness(
@@ -46,7 +66,7 @@ def analyze_completeness(
         return findings
 
     col_profile_map = {p.name: p for p in column_profiles}
-    missing_indices_by_col: dict[str, set[int]] = {}
+    missing_indices_by_col: dict[str, set[Any]] = {}
 
     for col in df.columns:
         col_str = str(col)
@@ -57,19 +77,23 @@ def analyze_completeness(
         # 1. Standard nulls & whitespace detection
         raw_null_mask = series.isna()
         whitespace_mask = pd.Series(False, index=df.index)
+        is_str_col = pd.api.types.is_string_dtype(series) or series.dtype == object
+        stripped_non_null: pd.Series | None = None
 
-        if pd.api.types.is_string_dtype(series) or series.dtype == object:
-            str_series = series.astype(str)
-            whitespace_mask = str_series.str.strip().eq("") & ~raw_null_mask
+        if is_str_col:
+            stripped_non_null = series[~raw_null_mask].astype(str).str.strip()
+            empty_str_mask = stripped_non_null.eq("")
+            if empty_str_mask.any():
+                whitespace_mask.loc[empty_str_mask.index[empty_str_mask]] = True
 
         total_missing_mask = raw_null_mask | whitespace_mask
         missing_count = int(total_missing_mask.sum())
         missing_ratio = missing_count / total_rows
-        missing_indices = set(df.index[total_missing_mask].tolist())
-        missing_indices_by_col[col_str] = missing_indices
+        missing_indices_list = df.index[total_missing_mask].tolist()
+        missing_indices_by_col[col_str] = set(missing_indices_list)
 
         # Check for optional lifecycle columns (e.g. exit_date, termination_date, cancellation_date)
-        is_optional_lifecycle = any(tok in col_str.lower() for tok in ["exit", "term", "end_date", "cancel", "dropout", "leave_date", "resign"])
+        is_optional_lifecycle = _is_optional_lifecycle_column(col_str)
 
         # Report significant standard missingness
         if missing_count > 0 and missing_ratio >= 0.05:
@@ -91,8 +115,8 @@ def analyze_completeness(
                     metric_name="missing_ratio",
                     observed_value=round(missing_ratio, 4),
                     threshold_or_expected=0.05,
-                    sample_row_indices=list(missing_indices)[:10],
-                    sample_values=["<NULL>" if raw_null_mask.iloc[idx] else "<WHITESPACE>" for idx in list(missing_indices)[:5]],
+                    sample_row_indices=missing_indices_list[:10],
+                    sample_values=["<NULL>" if raw_null_mask.loc[idx] else "<WHITESPACE>" for idx in missing_indices_list[:5]],
                     details=f"Column '{col_str}' has {missing_count} missing records out of {total_rows} total ({missing_ratio:.1%}).",
                 )
             ]
@@ -129,9 +153,9 @@ def analyze_completeness(
             )
 
         # 2. Disguised Text Sentinel Detection
-        if pd.api.types.is_string_dtype(series) or series.dtype == object:
-            non_null_mask = ~total_missing_mask
-            clean_strings = series[non_null_mask].astype(str).str.strip().str.lower()
+        if is_str_col and stripped_non_null is not None:
+            non_empty_strings = stripped_non_null[~stripped_non_null.eq("")] if whitespace_mask.any() else stripped_non_null
+            clean_strings = non_empty_strings.str.lower()
             sentinel_mask = clean_strings.isin(TEXT_SENTINELS)
             sentinel_count = int(sentinel_mask.sum())
 
@@ -177,8 +201,9 @@ def analyze_completeness(
                 )
 
         # 3. Disguised Numeric Sentinel Detection
-        if pd.api.types.is_numeric_dtype(series):
+        if pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series):
             valid_nums = series.dropna()
+            valid_nums = valid_nums[np.isfinite(valid_nums)]
             if len(valid_nums) >= 10:
                 for sentinel in NUMERIC_SENTINELS:
                     sentinel_hits = valid_nums[valid_nums == sentinel]
@@ -279,7 +304,7 @@ def analyze_completeness(
                                 metric_name="missingness_jaccard_similarity",
                                 observed_value=round(jaccard, 4),
                                 threshold_or_expected=0.90,
-                                sample_row_indices=list(overlap)[:10],
+                                sample_row_indices=sorted(overlap)[:10],
                                 sample_values=[],
                                 details=f"{overlap_count} records are concurrently missing in both columns.",
                             )

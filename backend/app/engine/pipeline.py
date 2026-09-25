@@ -12,7 +12,7 @@ from app.engine.completeness import analyze_completeness
 from app.engine.consistency import analyze_consistency
 from app.engine.distribution import analyze_distribution
 from app.engine.leakage import analyze_leakage
-from app.engine.profiler import profile_dataset
+from app.engine.profiler import _deduplicate_columns, profile_dataset
 from app.engine.scorer import calculate_trust_score
 from app.engine.uniqueness import analyze_uniqueness
 from app.engine.validity import analyze_validity
@@ -61,6 +61,8 @@ def run_forensic_pipeline(
     """
     start_time = time.perf_counter()
     analyzed_timestamp = datetime.now(timezone.utc).isoformat()
+
+    df = _deduplicate_columns(df)
 
     # 1. Profiler: Extract structural dimensions and column properties
     summary, column_profiles = profile_dataset(df)

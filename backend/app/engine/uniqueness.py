@@ -100,7 +100,7 @@ def analyze_uniqueness(
 
         sample_rows_preview = []
         for idx in affected_indices[:3]:
-            row_dict = {str(k): str(v)[:40] for k, v in df.iloc[idx].to_dict().items()}
+            row_dict = {str(k): str(v)[:40] for k, v in df.loc[idx].to_dict().items()}
             sample_rows_preview.append(row_dict)
 
         findings.append(
@@ -242,11 +242,28 @@ def analyze_uniqueness(
     # If no single column is 100% unique, search for small 2-column composite key
     has_single_unique = any(p.unique_count == total_rows for p in column_profiles if p.null_count == 0)
     if not has_single_unique and len(df.columns) >= 2 and total_rows >= 10:
-        candidate_cols = [c for c in df.columns if 5 < df[c].nunique() < total_rows and df[c].isna().sum() == 0]
+        candidate_cols = [
+            c
+            for c in df.columns
+            if (
+                (p := col_profile_map.get(str(c))) is not None
+                and 5 < p.unique_count < total_rows
+                and p.null_count == 0
+            )
+            or (
+                str(c) not in col_profile_map
+                and 5 < df[c].nunique() < total_rows
+                and df[c].isna().sum() == 0
+            )
+        ]
         for i in range(min(5, len(candidate_cols))):
             for j in range(i + 1, min(6, len(candidate_cols))):
                 col_a = candidate_cols[i]
                 col_b = candidate_cols[j]
+                prof_a = col_profile_map.get(str(col_a))
+                prof_b = col_profile_map.get(str(col_b))
+                if prof_a and prof_b and (prof_a.unique_count * prof_b.unique_count < total_rows):
+                    continue
                 if df[[col_a, col_b]].drop_duplicates().shape[0] == total_rows:
                     findings.append(
                         Finding(

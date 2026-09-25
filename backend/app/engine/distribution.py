@@ -77,7 +77,8 @@ def analyze_distribution(
 
         # Convert to float array and filter to strictly finite numbers for statistical analysis
         vals = clean_series.to_numpy(dtype=float)
-        vals_finite = vals[np.isfinite(vals)]
+        finite_mask = np.isfinite(vals)
+        vals_finite = vals[finite_mask]
         n_finite = len(vals_finite)
         if n_finite < 8:
             continue
@@ -102,8 +103,8 @@ def analyze_distribution(
 
         if extreme_count > 0 and ((extreme_count / n_finite) <= 0.10 or extreme_count <= 2):
             # Significant isolated extreme outliers
-            finite_series = clean_series[clean_series.isin(vals_finite)]
-            outlier_indices = finite_series.index[extreme_mask].tolist() if len(finite_series) == len(extreme_mask) else clean_series.head(extreme_count).index.tolist()
+            finite_series = clean_series[finite_mask]
+            outlier_indices = finite_series.index[extreme_mask].tolist()
             outlier_values = [round(float(v), 4) for v in vals_finite[extreme_mask][:5] if math.isfinite(v)]
             max_val = float(np.max(vals_finite))
             min_val = float(np.min(vals_finite))

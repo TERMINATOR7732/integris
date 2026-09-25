@@ -60,3 +60,13 @@ def test_leakage_missing_target_column_skips() -> None:
     _, profiles = profile_dataset(df)
     findings = analyze_leakage(df, profiles, target_column="non_existent_target")
     assert len(findings) == 0
+
+
+def test_leakage_numeric_correlation_with_inf() -> None:
+    """Ensure a single +/-inf value does not suppress correlation leakage detection on finite rows."""
+    x = [float(i) for i in range(1, 25)] + [np.inf]
+    y = [float(i * 2) for i in range(1, 25)] + [100.0]
+    df = pd.DataFrame({"target_val": y, "leaked_feature": x})
+    _, profiles = profile_dataset(df)
+    findings = analyze_leakage(df, profiles, target_column="target_val")
+    assert any(f.id == "FND-LKG-CORR-leaked_feature" for f in findings)

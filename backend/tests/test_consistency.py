@@ -90,3 +90,31 @@ def test_consistency_temporal_token_aware_matching() -> None:
         if f.id.startswith("FND-CNS-TEMP-"):
             for non_temp in ("attendance_pct", "percentage", "attendant", "ending_balance", "trend", "weekend_flag"):
                 assert non_temp not in f.affected_columns
+
+
+def test_consistency_mixed_timezone_and_identifier_exclusion() -> None:
+    """Verify mixed tz-aware and tz-naive timestamps compare safely and identifier columns are excluded."""
+    df = pd.DataFrame({
+        "order_id": ["20230501", "20230502", "20230503", "20230504", "20230505"],
+        "shipment_id": ["20210101", "20210102", "20210103", "20210104", "20210105"],
+        "order_date": [
+            "2025-05-10T12:00:00Z",
+            "2025-06-01T08:30:00Z",
+            "2025-07-01T00:00:00Z",
+            "2025-08-01T00:00:00Z",
+            "2025-09-01T00:00:00Z",
+        ],
+        "delivery_date": [
+            "2025-05-15",
+            "2025-05-20",  # Inverted against 2025-06-01T08:30:00Z
+            "2025-07-10",
+            "2025-08-10",
+            "2025-09-10",
+        ],
+    })
+    _, profiles = profile_dataset(df)
+    findings = analyze_consistency(df, profiles)
+    temp_ids = {f.id for f in findings if f.id.startswith("FND-CNS-TEMP-")}
+
+    assert "FND-CNS-TEMP-order_date-delivery_date" in temp_ids
+    assert "FND-CNS-TEMP-order_id-shipment_id" not in temp_ids

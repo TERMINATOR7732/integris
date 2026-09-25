@@ -104,20 +104,23 @@ def analyze_consistency(
     cols_lower = {str(c).lower(): str(c) for c in cols}
 
     col_profile_map = {p.name: p for p in column_profiles}
-    date_like_cols = set()
+    date_like_cols: list[str] = []
     for col in cols:
         col_str = str(col)
         series = df[col]
         if pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_datetime64_any_dtype(series):
             continue
         profile = col_profile_map.get(col_str)
+        if profile and profile.semantic_type in (SemanticType.IDENTIFIER, SemanticType.BOOLEAN):
+            continue
         is_dt_type = (profile.semantic_type == SemanticType.DATETIME) if profile else False
         if is_dt_type or _has_temporal_semantics(col_str):
             parsed = pd.to_datetime(series.dropna().head(10), errors="coerce", format="mixed")
             if parsed.notna().sum() >= 1:
-                date_like_cols.add(col_str)
+                date_like_cols.append(col_str)
 
     # 1. Temporal Ordering Contradictions
+    parsed_dates: dict[str, pd.Series] = {}
     for start_tokens, end_tokens, rule_desc in TEMPORAL_PAIRS:
         matched_starts = [c for c in date_like_cols if _matches_temporal_tokens(c, start_tokens)]
         matched_ends = [c for c in date_like_cols if _matches_temporal_tokens(c, end_tokens)]
@@ -126,8 +129,23 @@ def analyze_consistency(
             for matched_end in matched_ends:
                 if matched_start == matched_end:
                     continue
-                s_series = pd.to_datetime(df[matched_start], errors="coerce", format="mixed")
-                e_series = pd.to_datetime(df[matched_end], errors="coerce", format="mixed")
+                if matched_start not in parsed_dates:
+                    parsed_dates[matched_start] = pd.to_datetime(df[matched_start], errors="coerce", format="mixed")
+                if matched_end not in parsed_dates:
+                    parsed_dates[matched_end] = pd.to_datetime(df[matched_end], errors="coerce", format="mixed")
+
+                s_series = parsed_dates[matched_start]
+                e_series = parsed_dates[matched_end]
+
+                # Handle timezone-aware vs timezone-naive comparison safely
+                if (
+                    getattr(s_series.dtype, "tz", None) is not None
+                    or getattr(e_series.dtype, "tz", None) is not None
+                    or s_series.dtype == object
+                    or e_series.dtype == object
+                ):
+                    s_series = pd.to_datetime(df[matched_start], errors="coerce", format="mixed", utc=True)
+                    e_series = pd.to_datetime(df[matched_end], errors="coerce", format="mixed", utc=True)
 
                 valid_mask = s_series.notna() & e_series.notna()
                 if valid_mask.sum() > 0:
@@ -229,11 +247,11 @@ def analyze_consistency(
     # 3. Contradictory Min/Max Pairs
     for col_a in cols:
         a_str = str(col_a).lower()
-        if "min" in a_str:
+        if "min" in _tokenize_column_name(str(col_a)):
             base_name = a_str.replace("min", "")
             for col_b in cols:
                 b_str = str(col_b).lower()
-                if "max" in b_str and base_name == b_str.replace("max", "") and col_a != col_b:
+                if "max" in _tokenize_column_name(str(col_b)) and base_name == b_str.replace("max", "") and col_a != col_b:
                     s_a = pd.to_numeric(df[col_a], errors="coerce")
                     s_b = pd.to_numeric(df[col_b], errors="coerce")
                     violation = (s_a.notna() & s_b.notna()) & (s_a > s_b)

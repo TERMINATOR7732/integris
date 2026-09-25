@@ -128,3 +128,45 @@ def test_profiler_identifier_semantic_classification_token_aware() -> None:
 
     for col in non_id_cols:
         assert prof_map[col].semantic_type != SemanticType.IDENTIFIER, f"Expected {col} NOT to be IDENTIFIER"
+
+
+def test_profiler_free_text_not_misclassified_as_identifier() -> None:
+    """Ensure high-cardinality prose/sentence columns are classified as FREE_TEXT, not IDENTIFIER."""
+    long_sentences = [
+        f"Customer investigation record #{i} detailing extensive transaction audit notes and review commentary."
+        for i in range(15)
+    ]
+    medium_prose = [f"Detailed review comment from analyst number {i}" for i in range(15)]
+    df = pd.DataFrame({
+        "audit_narrative": long_sentences,
+        "analyst_comment": medium_prose,
+        "user_id": [1000 + i for i in range(15)],
+        "product_code": [f"00{100 + i}" for i in range(15)],
+    })
+    _, profiles = profile_dataset(df)
+    prof_map = {p.name: p for p in profiles}
+
+    assert prof_map["audit_narrative"].semantic_type == SemanticType.FREE_TEXT
+    assert prof_map["audit_narrative"].is_candidate_identifier is False
+    assert prof_map["analyst_comment"].is_candidate_identifier is False
+    assert prof_map["user_id"].semantic_type == SemanticType.IDENTIFIER
+    assert prof_map["user_id"].is_candidate_identifier is True
+    assert prof_map["product_code"].semantic_type == SemanticType.IDENTIFIER
+
+
+def test_profiler_tiny_dataset_and_duplicate_columns() -> None:
+    """Verify profiler handles tiny datasets (1-3 rows) and duplicate column names without crashing."""
+    df_tiny = pd.DataFrame({
+        "employee_id": ["EMP-1", "EMP-2"],
+        "department": ["Engineering", "Finance"],
+    })
+    _, profiles_tiny = profile_dataset(df_tiny)
+    prof_tiny = {p.name: p for p in profiles_tiny}
+    assert prof_tiny["employee_id"].semantic_type == SemanticType.IDENTIFIER
+    assert prof_tiny["department"].semantic_type == SemanticType.CATEGORICAL
+
+    # Duplicate column names
+    df_dup_cols = pd.DataFrame([[1, 10, 20], [2, 30, 40]], columns=["id", "score", "score"])
+    summary, profiles_dup = profile_dataset(df_dup_cols)
+    assert summary.total_cells == 6
+    assert [p.name for p in profiles_dup] == ["id", "score", "score_1"]
