@@ -25,9 +25,11 @@ uvicorn app.main:app --reload --port 8000
 Verify readiness by visiting `http://localhost:8000/api/v1/health` in your browser. Expected response:
 ```json
 {
-  "status": "operational",
+  "status": "healthy",
+  "service": "INTEGRIS Forensic Engine",
   "version": "0.1.0",
-  "engine": "active"
+  "engine_status": "ready",
+  "timestamp": "2026-09-25T14:05:22.844542+00:00"
 }
 ```
 
@@ -142,14 +144,13 @@ The response is a deterministic, JSON-serialized `ForensicDossier` contract matc
 You can verify the deployed production instances directly over HTTPS:
 
 - **Web Application:** [https://integris-ten.vercel.app](https://integris-ten.vercel.app)
-- **API Health:** `https://integris-api.vercel.app/api/v1/health`
+- **API Health:** `https://integris-sp5o.onrender.com/api/v1/health`
 
 ```bash
 # Verify Live Production Health:
-curl -i "https://integris-api.vercel.app/api/v1/health"
+curl -i "https://integris-sp5o.onrender.com/api/v1/health"
 
 # Test Investigation on Production Backend:
-curl -X POST "https://integris-api.vercel.app/api/v1/investigate" \
+curl -X POST "https://integris-sp5o.onrender.com/api/v1/investigate" \
   -F "file=@datasets/clean_baseline.csv"
 ```
-
