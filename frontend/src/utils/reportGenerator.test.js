@@ -276,3 +276,22 @@ test('Phase 9 UX & accessibility contracts are enforced across components', asyn
     columnDossiersSrc.includes('[columns, selectedSemanticType, searchQuery, highlightColumn]')
   );
 });
+
+test('Offline Investigation Mode guidance clearly distinguishes Online API vs Local CLI execution', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const uploaderSrc = fs.readFileSync(
+    path.join(__dirname, '../components/upload/DatasetUploader.tsx'),
+    'utf-8'
+  );
+
+  assert.ok(uploaderSrc.includes('ONLINE MODE'));
+  assert.ok(uploaderSrc.includes('Uses the deployed INTEGRIS API'));
+  assert.ok(uploaderSrc.includes('OFFLINE MODE'));
+  assert.ok(uploaderSrc.includes('Runs the forensic engine locally on your machine'));
+  assert.ok(uploaderSrc.includes('python -m app.offline investigate'));
+  assert.ok(!uploaderSrc.toLowerCase().includes('works offline in the browser'));
+});

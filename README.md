@@ -11,7 +11,7 @@ INTEGRIS is a deterministic data integrity and forensic analysis platform that e
 - **Repository:** [https://github.com/TERMINATOR7732/integris](https://github.com/TERMINATOR7732/integris)
 
 **Technical Documentation:**
-[Architecture](docs/ARCHITECTURE.md) • [Forensic Engine](docs/FORENSIC_ENGINE.md) • [Security](docs/SECURITY.md) • [Validation & Benchmarks](docs/VALIDATION.md) • [Portfolio Summary](docs/PORTFOLIO.md) • [Demo Guide](docs/demo.md)
+[Architecture](docs/ARCHITECTURE.md) • [Forensic Engine](docs/FORENSIC_ENGINE.md) • [Offline Mode](docs/OFFLINE_MODE.md) • [Security](docs/SECURITY.md) • [Validation & Benchmarks](docs/VALIDATION.md) • [Portfolio Summary](docs/PORTFOLIO.md) • [Demo Guide](docs/demo.md)
 
 ---
 
@@ -114,26 +114,56 @@ For a full breakdown of inputs, thresholds, finding IDs, evidence structures, an
 
 ## Architecture
 
-INTEGRIS is deployed as a decoupled two-tier web application:
+INTEGRIS exposes a single deterministic forensic engine through two execution modes:
 
 ```text
-Browser (Analyst)
-  │
-  ▼  HTTPS
-Vercel Frontend (React 19 / TypeScript / Vite)
-https://integris-ten.vercel.app
-  │
-  ▼  HTTPS (POST /api/v1/investigate, GET /api/v1/health)
-Render Backend API (FastAPI / Python)
-https://integris-sp5o.onrender.com/api/v1
-  │
-  ▼  In-Memory Execution (Zero Database / Zero Disk Persistence)
-INTEGRIS Forensic Engine (pandas / NumPy / SciPy / openpyxl / xlrd / pdfplumber)
+Browser (Analyst)                             Local Terminal (Analyst)
+  │                                             │
+  ▼  HTTPS                                      ▼  Local File Path
+Vercel Frontend (React 19 / TS / Vite)        Offline CLI Runner (backend/app/offline/)
+https://integris-ten.vercel.app               python -m app.offline investigate <file>
+  │                                             │
+  ▼  HTTPS (POST /api/v1/investigate)           │  Zero Network Transit
+Render Backend API (FastAPI / Python)           │
+https://integris-sp5o.onrender.com/api/v1       │
+  │                                             │
+  └──────────────────────┬──────────────────────┘
+                         ▼  In-Memory Execution (Zero Database / Zero Disk Retention)
+        INTEGRIS Ingestion & Forensic Engine (backend/app/ingestion/ + backend/app/engine/)
 ```
 
-- **Active Production Deployment:** Vercel hosts the static React frontend (`https://integris-ten.vercel.app`) and Render hosts the FastAPI backend container (`https://integris-sp5o.onrender.com`).
+- **Active Production Deployment (Online Mode):** Vercel hosts the static React frontend (`https://integris-ten.vercel.app`) and Render hosts the FastAPI backend container (`https://integris-sp5o.onrender.com`).
+- **Offline Investigation Mode (Local Runner):** Runs the exact same Python ingestion and forensic pipeline directly on the user's machine (`python -m app.offline investigate ...`) without sending datasets to Render.
 - **Note on Cloud Infrastructure:** Google Cloud Run is **not** part of the current production deployment.
-- See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for component responsibilities, data contracts, and sequence flows.
+- See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/OFFLINE_MODE.md`](docs/OFFLINE_MODE.md) for component responsibilities, data contracts, and sequence flows.
+
+---
+
+## Offline Investigation
+
+**Offline Investigation Mode runs the INTEGRIS forensic engine locally on the user's machine.**
+
+- **What It Is & Why It Exists:** A thin local CLI and Python execution adapter (`backend/app/offline/`) around the existing `backend/app/engine/` pipeline. It enables analysts to audit sensitive datasets or large local files (up to `50 MB`, such as the `45 MB` local stress dataset) without uploading data over the network or relying on free-tier cloud container memory/timeouts.
+- **How It Differs from Online Mode:** Online Mode uploads the dataset from the browser to the deployed Render API (`POST /api/v1/investigate`) for volatile in-memory analysis. Offline Mode executes the identical `ingest_dataset()` and `run_forensic_pipeline()` functions directly inside a local Python process; the dataset never leaves the machine.
+- **Prerequisites & Setup:** Requires Python `3.10+` and the dependencies in `backend/requirements.txt`:
+  ```bash
+  cd backend
+  python -m venv .venv
+  .venv\Scripts\Activate.ps1   # macOS/Linux: source .venv/bin/activate
+  pip install -r requirements.txt
+  ```
+- **Example Commands:**
+  ```bash
+  # Print ForensicDossier JSON to stdout:
+  python -m app.offline investigate ../datasets/clean_baseline.csv
+
+  # Run with an optional ML target column and write JSON report to disk:
+  python -m app.offline investigate ../datasets/corrupted_forensic.csv --target-column attrition --output ../dossier.json
+  ```
+- **Supported Formats:** `.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, and machine-readable tabular `.pdf` (validated via the shared `backend/app/ingestion/` parsers and magic-byte checks).
+- **Output:** Emits the exact `ForensicDossier` JSON structure (`metadata`, `summary`, `trust_score`, `findings`, `columns`, `recommendations`) sanitized via `sanitize_for_json()`, matching the online API output for the same input file.
+- **Privacy Behavior:** Processes the dataset strictly in local RAM, never contacts Render or external APIs, requires no database or AI service, emits no telemetry, and refuses to overwrite the input dataset file.
+- **Limitations:** Offline Mode requires a local Python environment (opening the Vercel web UI alone does not run the Python engine in the browser) and enforces the same engine format/dimension bounds (`50 MB` CSV/TSV/TXT, `25 MB` Excel, `15 MB` PDF, `500,000` rows, `1,000` columns). See [`docs/OFFLINE_MODE.md`](docs/OFFLINE_MODE.md) for full documentation.
 
 ---
 
@@ -153,10 +183,10 @@ These controls provide defense-in-depth for an unauthenticated public analysis A
 
 ## Testing
 
-All automated test suites and build checks pass on the current production baseline (`4558912`):
+All automated test suites and build checks pass on the current repository state:
 
-- **Backend Test Suite (`pytest`):** `111 passed, 0 failed, 0 skipped`
-- **Frontend Test Suite (`node --test`):** `6 passed, 0 failed, 0 skipped`
+- **Backend Test Suite (`pytest`):** `123 passed, 0 failed, 0 skipped` (`111` baseline + `12` offline mode & parity tests)
+- **Frontend Test Suite (`node --test`):** `7 passed, 0 failed, 0 skipped`
 - **Frontend Production Build (`tsc -b && vite build`):** `passed` (`0` TypeScript or bundler errors)
 
 Testing spans unit tests for every forensic analyzer, multi-format ingestion tests (`.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, `.pdf`), non-finite float (`NaN`/`Inf`) JSON serialization tests, CORS and filename-sanitization regression tests, frontend report-generation and accessibility contract tests, and Phase 7/8/9 validation passes. See [`docs/VALIDATION.md`](docs/VALIDATION.md) for details.
@@ -292,8 +322,9 @@ integris/
 │   │   ├── engine/                # Profiler, 6 forensic analyzers, Trust Scorer, JSON sanitizer
 │   │   ├── ingestion/             # Magic-byte detector and CSV/TSV/TXT/Excel/PDF parsers
 │   │   ├── models/report.py       # Pydantic v2 schemas (ForensicDossier, Finding, Evidence, etc.)
+│   │   ├── offline/               # Local CLI and offline execution adapter (runner.py, cli.py)
 │   │   └── main.py                # FastAPI application and ErrorHandlerMiddleware
-│   ├── tests/                     # Pytest unit, format ingestion, security, and E2E suites
+│   ├── tests/                     # Pytest unit, format ingestion, offline parity, and E2E suites
 │   └── requirements.txt           # Python dependencies
 ├── frontend/
 │   ├── src/
@@ -303,7 +334,7 @@ integris/
 │   │   └── utils/                 # Markdown/JSON report generators and Node test suite
 │   └── package.json               # Frontend scripts and dependencies
 ├── datasets/                      # Clean, moderate, and corrupted benchmark CSV datasets
-├── docs/                          # Architecture, Forensic Engine, Security, Validation, Portfolio, and Demo docs
+├── docs/                          # Architecture, Forensic Engine, Offline Mode, Security, Validation, Portfolio, Demo
 └── render.yaml                    # Render service deployment specification
 ```
 

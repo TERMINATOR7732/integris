@@ -6,17 +6,18 @@ This document describes the system architecture, component responsibilities, dat
 
 ## 1. System Overview
 
-INTEGRIS is a stateless, two-tier web application that performs deterministic forensic analysis on uploaded tabular datasets. The system is divided into:
+INTEGRIS is a stateless data integrity and forensic analysis platform that exposes a single deterministic Python forensic engine through two execution modes:
 
-1. **Investigation Frontend (`frontend/`):** A React 19 + TypeScript single-page application deployed on Vercel (`https://integris-ten.vercel.app`) that handles file selection, client-side header previewing, investigation configuration, interactive result exploration, and report export.
-2. **Forensic API & Engine (`backend/`):** A FastAPI + Python service deployed on Render (`https://integris-sp5o.onrender.com`) that validates uploads, parses six tabular/document formats in volatile memory, runs the forensic analysis pipeline, and returns a strongly typed `ForensicDossier` JSON response.
+1. **Online Investigation Mode (`frontend/` + `backend/app/api/`):** A React 19 + TypeScript single-page application deployed on Vercel (`https://integris-ten.vercel.app`) communicating over HTTPS with a FastAPI service deployed on Render (`https://integris-sp5o.onrender.com`). Uploaded datasets are analyzed in volatile memory and returned as a strongly typed `ForensicDossier` JSON response.
+2. **Offline Investigation Mode (`backend/app/offline/`):** A thin local CLI and Python execution adapter (`python -m app.offline investigate <file>`) that validates a local dataset file, invokes the exact same ingestion layer (`backend/app/ingestion/`) and forensic pipeline (`backend/app/engine/pipeline.py`) on the user's machine, and outputs the identical `ForensicDossier` JSON structure without transmitting the dataset to Render or any remote API.
 
 ```mermaid
 flowchart TD
     Browser["Analyst Browser"]
     Vercel["Vercel Frontend<br/>(React 19 / TypeScript / Vite)<br/>https://integris-ten.vercel.app"]
     Render["Render Backend API<br/>(FastAPI / Uvicorn)<br/>https://integris-sp5o.onrender.com/api/v1"]
-    Ingestion["In-Memory Ingestion Layer<br/>(detector, csv, text, excel, pdf parsers)"]
+    CLI["Offline Local CLI Runner<br/>(backend/app/offline/)<br/>python -m app.offline investigate"]
+    Ingestion["Shared In-Memory Ingestion Layer<br/>(detector, csv, text, excel, pdf parsers)"]
     Pipeline["Forensic Pipeline Orchestrator<br/>(backend/app/engine/pipeline.py)"]
     Analyzers["Profiler + 6 Forensic Analyzers<br/>(completeness, uniqueness, validity, distribution, consistency, leakage)"]
     Scorer["Trust Score & Verdict Engine + JSON Sanitizer<br/>(scorer.py, sanitizer.py)"]
@@ -24,10 +25,12 @@ flowchart TD
     Browser -->|"HTTPS"| Vercel
     Vercel -->|"POST /api/v1/investigate<br/>GET /api/v1/health"| Render
     Render --> Ingestion
+    CLI -->|"Local file bytes (Zero network transit)"| Ingestion
     Ingestion -->|"pandas DataFrame (RAM)"| Pipeline
     Pipeline --> Analyzers
     Analyzers --> Scorer
     Scorer -->|"ForensicDossier JSON (RFC 8259)"| Vercel
+    Scorer -->|"ForensicDossier JSON (stdout / --output)"| CLI
 ```
 
 ---
@@ -64,6 +67,8 @@ Located in `backend/app/`, the backend exposes a stateless HTTP interface and en
   - `GET /` — Platform metadata descriptor.
   - `GET /api/v1/health` — Returns `HealthResponse` (`status: "healthy"`, `engine_status: "ready"`, version, and UTC timestamp).
   - `POST /api/v1/investigate` — Sanitizes `file.filename` to its basename via `PurePath`, enforces format-specific byte limits (`await file.read(max_bytes + 1)`), invokes `ingest_dataset()`, enforces row/column limits (`500,000` rows, `1,000` columns), validates `target_column` if provided (`HTTP 422` if missing), runs `run_forensic_pipeline()`, sanitizes non-finite floats via `sanitize_for_json()`, and returns the `ForensicDossier`.
+- **Offline Execution Adapter (`offline/runner.py`, `offline/cli.py`):**
+  - `investigate_file()` / `investigate_file_to_dict()` / `investigate_file_to_json()`: Applies the same filename basename normalization, format-specific byte limits, `ingest_dataset()` parsing, `500,000` × `1,000` dimension checks, `target_column` validation, `run_forensic_pipeline()` invocation, and `sanitize_for_json()` serialization on a local file without network requests. See [`docs/OFFLINE_MODE.md`](OFFLINE_MODE.md).
 
 ---
 
@@ -160,6 +165,6 @@ Each anomaly detected by an analyzer is represented as an immutable `Finding` (`
 
 ## 10. Testing Strategy
 
-- **Backend Unit & Integration (`backend/tests/`):** `111` pytest tests verifying each analyzer module, multi-format parsers, non-finite float sanitization, CORS origin enforcement, filename sanitization, and end-to-end API contracts.
-- **Frontend Unit & Contract (`frontend/src/utils/reportGenerator.test.js`):** `6` Node test runner checks verifying byte/value formatting, JSON/Markdown dossier generation, and UI accessibility/responsive invariants.
+- **Backend Unit, Parity & Integration (`backend/tests/`):** `123` pytest tests verifying each analyzer module, multi-format parsers, non-finite float sanitization, CORS origin enforcement, filename sanitization, end-to-end API contracts, and Online-vs-Offline runner benchmark parity (`test_offline_runner.py`).
+- **Frontend Unit & Contract (`frontend/src/utils/reportGenerator.test.js`):** `7` Node test runner checks verifying byte/value formatting, JSON/Markdown dossier generation, Offline Mode UI guidance, and UI accessibility/responsive invariants.
 - **Synthetic Corpus Validation (`backend/tests/validate_claude_corpus.py`):** Local validation harness exercising 119 synthetic multi-format datasets against manifest ground truth.

@@ -8,6 +8,7 @@ import {
   Target,
   AlertCircle,
   FileCheck,
+  Terminal,
 } from 'lucide-react';
 
 interface DatasetUploaderProps {
@@ -528,6 +529,88 @@ export function DatasetUploader({
           </form>
         </div>
       )}
+
+      {/* Execution Mode Guidance: Online vs. Offline */}
+      <div
+        style={{
+          marginTop: '1.5rem',
+          padding: '1.25rem 1.5rem',
+          borderRadius: '12px',
+          backgroundColor: '#0a0f18',
+          border: '1px solid #1e293b',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            color: '#f1f5f9',
+            fontWeight: 600,
+            fontSize: '0.88rem',
+            marginBottom: '0.75rem',
+          }}
+        >
+          <Terminal size={16} color="#38bdf8" />
+          <span>Investigation Execution Modes</span>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+            gap: '1rem',
+            marginBottom: '0.85rem',
+          }}
+        >
+          <div
+            style={{
+              padding: '0.75rem 0.9rem',
+              borderRadius: '8px',
+              backgroundColor: '#0d1422',
+              border: '1px solid #1e293b',
+            }}
+          >
+            <div className="mono" style={{ fontSize: '0.72rem', fontWeight: 700, color: '#38bdf8', marginBottom: '4px' }}>
+              ONLINE MODE (WEB DEFAULT)
+            </div>
+            <p style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5, margin: 0 }}>
+              Uses the deployed INTEGRIS API. Uploaded datasets are analyzed in volatile memory and never persisted.
+            </p>
+          </div>
+
+          <div
+            style={{
+              padding: '0.75rem 0.9rem',
+              borderRadius: '8px',
+              backgroundColor: '#0d1422',
+              border: '1px solid #1e293b',
+            }}
+          >
+            <div className="mono" style={{ fontSize: '0.72rem', fontWeight: 700, color: '#34d399', marginBottom: '4px' }}>
+              OFFLINE MODE (LOCAL CLI)
+            </div>
+            <p style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5, margin: 0 }}>
+              Runs the forensic engine locally on your machine. Dataset stays on this machine and is never sent to Render.
+            </p>
+          </div>
+        </div>
+
+        <div
+          className="mono"
+          style={{
+            padding: '0.65rem 0.85rem',
+            borderRadius: '6px',
+            backgroundColor: '#070a10',
+            border: '1px solid #172030',
+            fontSize: '0.75rem',
+            color: '#cbd5e1',
+            overflowX: 'auto',
+          }}
+        >
+          cd backend &amp;&amp; python -m app.offline investigate ../datasets/clean_baseline.csv --output dossier.json
+        </div>
+      </div>
 
       {/* Architectural Capabilities Footer */}
       <div
