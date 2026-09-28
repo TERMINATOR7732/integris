@@ -2,7 +2,7 @@
 
 INTEGRIS provides two ways to run forensic investigations locally without uploading datasets to Render or any remote API:
 
-1. **Browser-Local Mode (`LOCAL` in the Vercel Web UI):** Runs the complete 6-module forensic engine directly inside an isolated browser Web Worker (`frontend/src/local/`) on `.csv`, `.tsv`, and `.txt` files up to `50 MB` (including `45 MB` stress datasets).
+1. **Browser-Local Mode (`LOCAL` in the Vercel Web UI):** Runs the complete 6-module forensic engine directly inside an isolated browser Web Worker (`frontend/src/local/`) across all 6 supported formats: `.csv`, `.tsv`, and `.txt` up to `50 MB` (including `45 MB` stress datasets), `.xlsx` and `.xls` up to `25 MB` (with `250 MB` uncompressed bomb protection), and `.pdf` up to `15 MB`.
 2. **Python CLI Offline Mode (`backend/app/offline/`):** Runs the Python ingestion and forensic pipeline (`backend/app/engine/`) directly from a local terminal across `.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, and `.pdf` files.
 
 ---
@@ -24,9 +24,12 @@ INTEGRIS provides two ways to run forensic investigations locally without upload
 ```
 
 - **Browser-Local Engine (`frontend/src/local/`):**
-  - `ingestion/detector.ts` & `ingestion/csvParser.ts`: Validates magic bytes (`%PDF-`, `PK\x03\x04`, OLE2, null bytes), auto-detects delimiters and text encodings (`UTF-8`, `CP1252`), and executes a 2-pass byte-streaming RFC 4180 parse into compact typed arrays (`Float64Array` for numeric/boolean columns and dictionary-encoded `Int32Array` for string columns).
+  - `ingestion/detector.ts`: Validates magic bytes (`%PDF`, `PK\x03\x04`, OLE2, null bytes), enforces per-format size limits (`50 MB` CSV/TSV/TXT, `25 MB` XLSX/XLS, `15 MB` PDF) and dimension limits (`500,000` rows, `1,000` columns).
+  - `ingestion/csvParser.ts`: Auto-detects delimiters and text encodings (`UTF-8`, `CP1252`), and executes a 2-pass byte-streaming RFC 4180 parse into compact typed arrays (`Float64Array` for numeric/boolean columns and dictionary-encoded `Int32Array` for string columns).
+  - `ingestion/excelParser.ts`: Validates `.xlsx` ZIP Central Directory headers (enforcing a `250 MB` uncompressed decompression-bomb guard) and `.xls` OLE2 headers, selects the first worksheet with usable tabular rows, normalizes date cells (`YYYY-MM-DD HH:MM:SS`), and preserves literal strings like `"N/A"`.
+  - `ingestion/pdfParser.ts`: Uses `pdfjs-dist` with an embedded in-process fake-worker (`LoopbackPort`) to extract ruled table grids from PDF vector paths and text operators across single-page and multi-page documents with zero network calls.
   - `engine/*`: Exact TypeScript ports of `profiler`, `completeness`, `uniqueness`, `validity`, `distribution`, `consistency`, `leakage`, `scorer`, `sanitizer`, and `pipeline`, verified for 100% output parity against the Python reference engine.
-  - `worker/forensicWorker.ts` & `index.ts`: Transfers the file's `ArrayBuffer` with zero copy into a dedicated Web Worker, streams stage progress updates (`0%` → `100%`), and supports instant `AbortSignal` cancellation (`worker.terminate()`).
+  - `worker/forensicWorker.ts` & `workerClient.ts`: Transfers the file's `ArrayBuffer` with zero copy into a dedicated Web Worker, streams stage progress updates (`0%` → `100%`), and supports instant `AbortSignal` cancellation (`worker.terminate()`).
 - **Python Reference Engine (`backend/app/engine/` & `backend/app/offline/`):**
   - `backend/app/engine/` (`profiler.py`, `completeness.py`, `uniqueness.py`, `validity.py`, `distribution.py`, `consistency.py`, `leakage.py`, `scorer.py`, `pipeline.py`, `sanitizer.py`) and `backend/app/ingestion/` remain untouched and un-duplicated.
   - `backend/app/offline/runner.py` & `cli.py`: Provides the command-line interface (`python -m app.offline investigate ...`).
@@ -37,8 +40,8 @@ INTEGRIS provides two ways to run forensic investigations locally without upload
 
 1. Open [https://integris-ten.vercel.app](https://integris-ten.vercel.app) (or `http://localhost:5173` in local development).
 2. Select **`LOCAL`** in the Execution Mode toggle (`LOCAL PROCESSING — Your file stays in this browser.`).
-3. Drop or browse for a `.csv`, `.tsv`, or `.txt` dataset (up to `50 MB`).
-4. Optionally select a target column for ML leakage checks and click **Run Local Investigation**.
+3. Drop or browse for a `.csv`, `.tsv`, `.txt` (up to `50 MB`), `.xlsx`, `.xls` (up to `25 MB`), or `.pdf` (up to `15 MB`) dataset.
+4. Optionally select or enter a target column for ML leakage checks and click **Run Local Investigation**.
 5. Inspect the resulting Forensic Dossier (`Processed locally — no server upload.`) and export to Markdown, JSON, or Print/PDF.
 
 ---

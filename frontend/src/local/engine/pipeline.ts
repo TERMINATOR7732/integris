@@ -1,7 +1,8 @@
 /**
  * INTEGRIS Local Engine — Master Forensic Investigation Pipeline
  * Mirrors backend/app/engine/pipeline.py with real stage-by-stage progress
- * reporting and cancellation support for browser Web Worker execution.
+ * reporting and cancellation support for browser Web Worker execution
+ * across all 6 supported formats (.csv, .tsv, .txt, .xlsx, .xls, .pdf).
  */
 
 import type {
@@ -13,12 +14,15 @@ import type {
 } from '../../types/integris';
 import {
   detectLocalFileType,
-  type SupportedLocalFileType,
+  LocalIngestionError,
+  sanitizeUploadFilename,
 } from '../ingestion/detector';
 import {
   type ColumnarFrame,
   parseColumnarCsvBytes,
 } from '../ingestion/csvParser';
+import { parseExcelBytes } from '../ingestion/excelParser';
+import { parsePdfBytes } from '../ingestion/pdfParser';
 import { profileDataset, roundTo } from './profiler';
 import { analyzeCompleteness } from './completeness';
 import { analyzeUniqueness } from './uniqueness';
@@ -29,27 +33,14 @@ import { analyzeLeakage } from './leakage';
 import { calculateTrustScore } from './scorer';
 import { sanitizeForJson } from './sanitizer';
 
-export interface LocalProgressUpdate {
-  percent: number;
-  stageIndex: number;
-  stageLabel: string;
-}
+import {
+  LocalInvestigationCancelledError,
+  type LocalInvestigationOptions,
+  type LocalProgressUpdate,
+} from './types';
 
-export interface LocalInvestigationOptions {
-  fileName: string;
-  fileSizeBytes?: number;
-  targetColumn?: string | null;
-  fileType?: SupportedLocalFileType;
-  onProgress?: (update: LocalProgressUpdate) => void;
-  isCancelled?: () => boolean;
-}
-
-export class LocalInvestigationCancelledError extends Error {
-  constructor() {
-    super('Local investigation was cancelled by the user.');
-    this.name = 'LocalInvestigationCancelledError';
-  }
-}
+export { LocalInvestigationCancelledError };
+export type { LocalInvestigationOptions, LocalProgressUpdate };
 
 const SEVERITY_ORDER: Record<Severity, number> = {
   critical: 0,
@@ -78,9 +69,27 @@ export function runLocalForensicPipeline(
     fileSizeBytes = 0,
     targetColumn = null,
     fileType = 'csv',
+    sheetName = null,
+    availableSheets = null,
+    tableIndex = null,
+    pageCount = null,
     onProgress,
     isCancelled,
   } = options;
+
+  const normalizedTarget =
+    targetColumn && targetColumn.trim() !== '' ? targetColumn.trim() : null;
+  if (normalizedTarget && !frame.columnsByName.has(normalizedTarget)) {
+    const colPreview = frame.columnNames.slice(0, 20);
+    const suffix =
+      frame.columnNames.length > 20
+        ? ` (and ${frame.columnNames.length - 20} more)`
+        : '';
+    throw new LocalIngestionError(
+      `Specified target column '${normalizedTarget}' does not exist in dataset. Available columns: [${colPreview.map((c) => `'${c}'`).join(', ')}]${suffix}.`,
+      422
+    );
+  }
 
   checkCancel(isCancelled);
   onProgress?.({
@@ -127,8 +136,6 @@ export function runLocalForensicPipeline(
       'Auditing cross-column logic, target leakage & computing Trust Score',
   });
 
-  const normalizedTarget =
-    targetColumn && targetColumn.trim() !== '' ? targetColumn.trim() : null;
   rawFindings.push(...analyzeLeakage(frame, profiles, normalizedTarget));
 
   // 3. Deduplicate findings by ID and stably sort by severity
@@ -175,7 +182,7 @@ export function runLocalForensicPipeline(
   const elapsedMs = roundTo(Math.max(0.01, performance.now() - startTimeMs), 2);
 
   const metadata: InvestigationMetadata = {
-    file_name: fileName,
+    file_name: sanitizeUploadFilename(fileName),
     file_size_bytes: fileSizeBytes,
     row_count: frame.rowCount,
     column_count: frame.columnCount,
@@ -183,10 +190,10 @@ export function runLocalForensicPipeline(
     execution_time_ms: elapsedMs,
     engine_version: '0.1.0',
     file_type: fileType,
-    sheet_name: null,
-    available_sheets: null,
-    table_index: null,
-    page_count: null,
+    sheet_name: sheetName,
+    available_sheets: availableSheets,
+    table_index: tableIndex,
+    page_count: pageCount,
   };
 
   const dossier: ForensicDossier = {
@@ -209,7 +216,8 @@ export function runLocalForensicPipeline(
 }
 
 /**
- * Full end-to-end browser-local investigation entrypoint from raw file bytes.
+ * Synchronous browser-local investigation entrypoint from raw file bytes
+ * for `.csv`, `.tsv`, `.txt`, `.xlsx`, and `.xls` files.
  */
 export function investigateBytesLocally(
   fileBytes: Uint8Array,
@@ -234,6 +242,38 @@ export function investigateBytesLocally(
     stageLabel: 'Parsing dataset structure locally in browser memory',
   });
 
+  if (detectedType === 'xlsx' || detectedType === 'xls') {
+    const excelResult = parseExcelBytes(fileBytes, detectedType, (frac) => {
+      checkCancel(isCancelled);
+      if (frac >= 0.5) {
+        onProgress?.({
+          percent: 18,
+          stageIndex: 0,
+          stageLabel: 'Extracting worksheet table into columnar memory',
+        });
+      }
+    });
+
+    return runLocalForensicPipeline(
+      excelResult.frame,
+      {
+        ...options,
+        fileSizeBytes: options.fileSizeBytes ?? fileBytes.byteLength,
+        fileType: excelResult.fileType,
+        sheetName: excelResult.sheetName,
+        availableSheets: excelResult.availableSheets,
+      },
+      startTimeMs
+    );
+  }
+
+  if (detectedType === 'pdf') {
+    throw new LocalIngestionError(
+      'PDF extraction requires asynchronous execution via investigateBytesLocallyAsync or runBrowserLocalInvestigation.',
+      400
+    );
+  }
+
   const frame = parseColumnarCsvBytes(fileBytes, detectedType, (frac) => {
     checkCancel(isCancelled);
     if (frac >= 0.5) {
@@ -251,6 +291,61 @@ export function investigateBytesLocally(
       ...options,
       fileSizeBytes: options.fileSizeBytes ?? fileBytes.byteLength,
       fileType: detectedType,
+    },
+    startTimeMs
+  );
+}
+
+/**
+ * Asynchronous browser-local investigation entrypoint supporting all 6 formats:
+ * `.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, and `.pdf`.
+ */
+export async function investigateBytesLocallyAsync(
+  fileBytes: Uint8Array,
+  options: LocalInvestigationOptions
+): Promise<ForensicDossier> {
+  const startTimeMs = performance.now();
+  const { fileName, onProgress, isCancelled } = options;
+
+  checkCancel(isCancelled);
+  const detectedType = detectLocalFileType(fileBytes, fileName);
+
+  if (detectedType !== 'pdf') {
+    return investigateBytesLocally(fileBytes, options);
+  }
+
+  onProgress?.({
+    percent: 0,
+    stageIndex: 0,
+    stageLabel: 'Validating PDF signature & initializing local extractor',
+  });
+
+  checkCancel(isCancelled);
+  onProgress?.({
+    percent: 10,
+    stageIndex: 0,
+    stageLabel: 'Extracting structured tables across PDF pages locally',
+  });
+
+  const pdfResult = await parsePdfBytes(fileBytes, (frac) => {
+    checkCancel(isCancelled);
+    if (frac >= 0.5) {
+      onProgress?.({
+        percent: 18,
+        stageIndex: 0,
+        stageLabel: 'Coalescing multi-page PDF table into columnar memory',
+      });
+    }
+  });
+
+  return runLocalForensicPipeline(
+    pdfResult.frame,
+    {
+      ...options,
+      fileSizeBytes: options.fileSizeBytes ?? fileBytes.byteLength,
+      fileType: 'pdf',
+      tableIndex: pdfResult.tableIndex,
+      pageCount: pdfResult.pageCount,
     },
     startTimeMs
   );

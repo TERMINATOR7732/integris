@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, ShieldAlert, BarChart3, Columns, Scale } from 'lucide-react';
 import { getHealth, investigateDataset, IntegrisApiError } from './services/api';
-import { runBrowserLocalInvestigation, type LocalProgressUpdate } from './local';
+import { runBrowserLocalInvestigation, type LocalProgressUpdate } from './local/workerClient';
 import type { HealthResponse, ForensicDossier, Finding } from './types/integris';
 import { Header } from './components/common/Header';
 import { DatasetUploader, type InvestigationExecutionMode } from './components/upload/DatasetUploader';

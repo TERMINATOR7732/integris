@@ -376,7 +376,7 @@ export function profileDataset(frame: ColumnarFrame): {
 
     profiles.push({
       name: col.name,
-      inferred_dtype: col.dtype,
+      inferred_dtype: col.inferredDtypeOverride ?? col.dtype,
       semantic_type: semanticType,
       non_null_count: nonNullCount,
       null_count: nullCount,

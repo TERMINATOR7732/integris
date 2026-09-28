@@ -139,7 +139,7 @@ Local Terminal (Analyst)
 ```
 
 - **Online Mode (Default Web API):** Vercel hosts the React frontend (`https://integris-ten.vercel.app`) and Render hosts the FastAPI backend container (`https://integris-sp5o.onrender.com`) supporting `.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, and `.pdf`.
-- **Browser-Local Mode (`LOCAL` in Web UI):** Executes the full 6-module forensic pipeline directly inside an isolated browser Web Worker (`frontend/src/local/worker/forensicWorker.ts`) for `.csv`, `.tsv`, and `.txt` datasets up to `50 MB` (including the `45 MB` stress dataset) with zero server uploads.
+- **Browser-Local Mode (`LOCAL` in Web UI):** Executes the full 6-module forensic pipeline directly inside an isolated browser Web Worker (`frontend/src/local/worker/forensicWorker.ts`) across all 6 supported formats (`.csv`, `.tsv`, `.txt` up to `50 MB`; `.xlsx`, `.xls` up to `25 MB` with `250 MB` uncompressed bomb protection; `.pdf` up to `15 MB`) with zero server uploads.
 - **Python CLI Offline Mode (`backend/app/offline/`):** Runs the Python ingestion and forensic pipeline directly from a local terminal (`python -m app.offline investigate ...`) without network transit.
 - **Note on Cloud Infrastructure:** Google Cloud Run is **not** part of the current production deployment.
 - See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/OFFLINE_MODE.md`](docs/OFFLINE_MODE.md) for component responsibilities, data contracts, and sequence flows.
@@ -152,15 +152,15 @@ Local Terminal (Analyst)
 
 **Browser-Local Mode runs the complete INTEGRIS forensic investigation directly inside the user's browser without uploading the dataset to Render or any external API.**
 
-- **How to Use:** Open [https://integris-ten.vercel.app](https://integris-ten.vercel.app), toggle the execution mode selector to **`LOCAL`**, select a `.csv`, `.tsv`, or `.txt` file (up to `50 MB`), optionally choose a target column, and click **Run Local Investigation**.
-- **Architecture & Memory Discipline:** The file's `ArrayBuffer` is transferred with zero copy into a dedicated Web Worker (`frontend/src/local/`). A 2-pass byte-streaming RFC 4180 parser constructs compact columnar typed arrays (`Float64Array` for numeric/boolean columns and dictionary-encoded `Int32Array` for string columns) and executes exact ports of all 6 Python forensic modules (`completeness`, `uniqueness`, `validity`, `distribution`, `consistency`, `leakage`) plus `profiler` and `scorer`.
-- **Parity & 45 MB Stress Performance:** Verified for 100% output parity (`overall_score`, `verdict`, `grade`, `penalties`, `findings`, `columns`, `recommendations`) against the Python reference engine across all benchmark datasets and the `45.6 MB` stress dataset (`156,310 × 26`, processed in `~2.7s`).
+- **How to Use:** Open [https://integris-ten.vercel.app](https://integris-ten.vercel.app), toggle the execution mode selector to **`LOCAL`**, select any supported dataset (`.csv`, `.tsv`, `.txt` up to `50 MB`; `.xlsx`, `.xls` up to `25 MB`; `.pdf` up to `15 MB`), optionally choose a target column, and click **Run Local Investigation**.
+- **Architecture & Memory Discipline:** The file's `ArrayBuffer` is transferred with zero copy into a dedicated Web Worker (`frontend/src/local/`). Text files use a 2-pass byte-streaming RFC 4180 parser; Excel workbooks (`.xlsx` and legacy `.xls`) use SheetJS with ZIP Central Directory validation, a `250 MB` decompression-bomb guard, multi-sheet selection, and date normalization; PDF documents (`.pdf`) use an embedded PDF.js fake-worker (`LoopbackPort`) to extract and coalesce single-page and multi-page ruled tables with zero network calls. All parsed tables feed into compact columnar typed arrays (`Float64Array` and dictionary-encoded `Int32Array`) and execute exact ports of all 6 Python forensic modules (`completeness`, `uniqueness`, `validity`, `distribution`, `consistency`, `leakage`) plus `profiler` and `scorer`.
+- **Parity & 45 MB Stress Performance:** Verified for 100% output parity (`overall_score`, `verdict`, `grade`, `penalties`, `findings`, `columns`, `recommendations`, `sheet_name`, `available_sheets`, `page_count`, `table_index`) against the Python reference engine across all 6 formats and the `45.6 MB` stress dataset (`156,310 × 26`, processed in `~2.7s`).
 - **Privacy Guarantee:** Zero network requests are made during local investigation (`LOCAL PROCESSING — Your file stays in this browser.` / `Processed locally — no server upload.`).
-- **Format Scope:** Supports `.csv`, `.tsv`, and `.txt` up to `50 MB`. Binary `.xlsx`, `.xls`, and `.pdf` files are rejected in Browser-Local Mode with guidance to export to `.csv` or switch to Online Mode.
+- **Format Scope & Limits:** Supports `.csv`, `.tsv`, `.txt` (`50 MB`), `.xlsx`, `.xls` (`25 MB`, `250 MB` max uncompressed), and `.pdf` (`15 MB`, machine-readable tabular PDFs; scanned/image-only PDFs are rejected with an explicit OCR-unavailable notice).
 
 ### 2. Python CLI Offline Mode (`backend/app/offline/`)
 
-For local terminal automation or multi-format offline files (`.xlsx`, `.xls`, `.pdf`), INTEGRIS also provides a Python CLI wrapper around `backend/app/engine/`:
+For local terminal automation or batch scripts, INTEGRIS also provides a Python CLI wrapper around `backend/app/engine/`:
 
 ```bash
 cd backend
@@ -191,7 +191,7 @@ These controls provide defense-in-depth for an unauthenticated public analysis A
 All automated test suites and build checks pass on the current repository state:
 
 - **Backend Test Suite (`pytest`):** `123 passed, 0 failed, 0 skipped` (`111` baseline + `12` offline mode & parity tests)
-- **Frontend Test Suite (`node --test`):** `13 passed, 0 failed, 0 skipped` (`7` report/UI tests + `6` browser-local engine parity & 45 MB stress tests)
+- **Frontend Test Suite (`node --test`):** `17 passed, 0 failed, 0 skipped` (`7` report/UI tests + `10` browser-local multi-format engine parity, adversarial, & 45 MB stress tests)
 - **Frontend Production Build (`tsc -b && vite build`):** `passed` (`0` TypeScript or bundler errors)
 
 Testing spans unit tests for every forensic analyzer, multi-format ingestion tests (`.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, `.pdf`), browser-local engine parity tests against the Python reference engine (including the `45 MB` stress dataset), non-finite float (`NaN`/`Inf`) JSON serialization tests, CORS and filename-sanitization regression tests, frontend report-generation and accessibility contract tests, and Phase 7/8/9 validation passes. See [`docs/VALIDATION.md`](docs/VALIDATION.md) for details.

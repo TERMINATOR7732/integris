@@ -9,13 +9,22 @@
  *   dictionary-encoded `Int32Array` + `string[]` for string columns).
  */
 
-import { LocalIngestionError, type SupportedLocalFileType } from './detector';
+import {
+  LocalIngestionError,
+  MAX_DATASET_COLUMNS,
+  MAX_DATASET_ROWS,
+  type SupportedLocalFileType,
+} from './detector';
 
 export type InferredDtype = 'int64' | 'float64' | 'bool' | 'str';
 
 export interface ColumnData {
   name: string;
   dtype: InferredDtype;
+  /**
+   * Optional override for reported `inferred_dtype` in ColumnProfile (e.g. 'object' for mixed Excel columns).
+   */
+  inferredDtypeOverride?: string;
   rowCount: number;
   nullCount: number;
   nonNullCount: number;
@@ -101,14 +110,42 @@ const POW10 = new Float64Array([
 const utf8Decoder = new TextDecoder('utf-8', { fatal: false });
 
 /**
- * Deduplicates and normalizes column headers identically to backend/app/engine/profiler.py.
+ * Deduplicates and normalizes column headers identically to pandas `read_csv`
+ * followed by `backend/app/engine/profiler.py`.
  */
 export function deduplicateColumnNames(rawHeaders: string[]): string[] {
+  // Stage 1: pandas read_csv mangle_dupe_cols on raw header tokens
+  const rawSeen = new Map<string, number>();
+  const mangledRaw: string[] = [];
+
+  for (let idx = 0; idx < rawHeaders.length; idx++) {
+    const raw = rawHeaders[idx] ?? '';
+    if (raw === '') {
+      mangledRaw.push('');
+      continue;
+    }
+    let count = rawSeen.get(raw) ?? 0;
+    if (count > 0) {
+      let candidate = `${raw}.${count}`;
+      while (rawSeen.has(candidate)) {
+        count++;
+        candidate = `${raw}.${count}`;
+      }
+      rawSeen.set(raw, count + 1);
+      rawSeen.set(candidate, 1);
+      mangledRaw.push(candidate);
+    } else {
+      rawSeen.set(raw, 1);
+      mangledRaw.push(raw);
+    }
+  }
+
+  // Stage 2: profiler.py strip + underscore deduplication
   const seen = new Map<string, number>();
   const newCols: string[] = [];
 
-  for (let idx = 0; idx < rawHeaders.length; idx++) {
-    const colStr = (rawHeaders[idx] ?? '').trim() || `unnamed_col_${idx}`;
+  for (let idx = 0; idx < mangledRaw.length; idx++) {
+    const colStr = (mangledRaw[idx] ?? '').trim() || `unnamed_col_${idx}`;
     const prevCount = seen.get(colStr);
     if (prevCount !== undefined) {
       const nextCount = prevCount + 1;
@@ -554,6 +591,11 @@ export function parseColumnarCsvBytes(
         const fEnd = p;
         if (p < totalLen && rawBytes[p] === 34) {
           p++; // skip closing quote
+        } else {
+          throw new LocalIngestionError(
+            'Malformed dataset: Structural delimiter or quote parsing error encountered.',
+            400
+          );
         }
 
         // Consume any trailing characters until delimiter or newline
@@ -661,6 +703,12 @@ export function parseColumnarCsvBytes(
       422
     );
   }
+  if (numCols > MAX_DATASET_COLUMNS) {
+    throw new LocalIngestionError(
+      `Dataset contains ${numCols.toLocaleString()} columns, which exceeds the maximum processing limit of ${MAX_DATASET_COLUMNS.toLocaleString()} columns.`,
+      413
+    );
+  }
 
   const columnNames = deduplicateColumnNames(rawHeaderList);
   const dataStartPos = headerRes.nextPos;
@@ -698,6 +746,12 @@ export function parseColumnarCsvBytes(
     if (tempFieldCount > numCols) continue;
 
     validRowCount++;
+    if (validRowCount > MAX_DATASET_ROWS) {
+      throw new LocalIngestionError(
+        `Dataset contains more than ${MAX_DATASET_ROWS.toLocaleString()} records, which exceeds the maximum processing limit of ${MAX_DATASET_ROWS.toLocaleString()} rows.`,
+        413
+      );
+    }
     for (let c = 0; c < numCols; c++) {
       if (c >= tempFieldCount) {
         // Missing trailing field -> NA

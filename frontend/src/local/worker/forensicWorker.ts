@@ -1,11 +1,12 @@
 /**
  * INTEGRIS Local Investigation — Dedicated Web Worker Entrypoint
- * Executes CSV/TSV/TXT parsing and the 6-module forensic pipeline off the main UI thread.
+ * Executes CSV, TSV, TXT, XLSX, XLS, and PDF parsing and the 6-module
+ * forensic pipeline off the main UI thread with zero network calls.
  */
 
 import type { ForensicDossier } from '../../types/integris';
 import {
-  investigateBytesLocally,
+  investigateBytesLocallyAsync,
   type LocalProgressUpdate,
 } from '../engine/pipeline';
 import { LocalIngestionError } from '../ingestion/detector';
@@ -38,13 +39,13 @@ const ctx = self as unknown as {
   postMessage: (message: ForensicWorkerOutboundMessage) => void;
 };
 
-ctx.onmessage = (event: MessageEvent<ForensicWorkerStartMessage>) => {
+ctx.onmessage = async (event: MessageEvent<ForensicWorkerStartMessage>) => {
   const msg = event.data;
   if (!msg || msg.type !== 'START') return;
 
   try {
     const fileBytes = new Uint8Array(msg.buffer);
-    const dossier = investigateBytesLocally(fileBytes, {
+    const dossier = await investigateBytesLocallyAsync(fileBytes, {
       fileName: msg.fileName,
       fileSizeBytes: msg.fileSizeBytes,
       targetColumn: msg.targetColumn,

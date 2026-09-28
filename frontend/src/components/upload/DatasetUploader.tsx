@@ -55,16 +55,6 @@ export function DatasetUploader({
     } else {
       setInternalMode(nextMode);
     }
-    if (selectedFile && nextMode === 'local') {
-      const ext = selectedFile.name
-        .slice(selectedFile.name.lastIndexOf('.'))
-        .toLowerCase();
-      if (!['.csv', '.tsv', '.txt'].includes(ext)) {
-        setLocalError(
-          `Local Browser Mode supports .csv, .tsv, and .txt datasets. '${selectedFile.name}' (${ext}) requires binary document extraction — please export to CSV or switch to Online Mode.`
-        );
-      }
-    }
   };
 
   const [dragActive, setDragActive] = useState<boolean>(false);
@@ -85,13 +75,6 @@ export function DatasetUploader({
     if (!['.csv', '.tsv', '.txt', '.xlsx', '.xls', '.pdf'].includes(ext)) {
       setLocalError(
         `Unsupported file format '${ext || 'unknown'}'. Please provide a .csv, .tsv, .txt, .xlsx, .xls, or .pdf file.`
-      );
-      return;
-    }
-
-    if (activeMode === 'local' && !['.csv', '.tsv', '.txt'].includes(ext)) {
-      setLocalError(
-        `Local Browser Mode supports .csv, .tsv, and .txt datasets. '${file.name}' (${ext}) requires binary document extraction — please export the table to CSV or switch to Online Mode.`
       );
       return;
     }
@@ -410,7 +393,7 @@ export function DatasetUploader({
           <input
             ref={inputRef}
             type="file"
-            accept={activeMode === 'local' ? '.csv,.tsv,.txt' : '.csv,.tsv,.txt,.xlsx,.xls,.pdf'}
+            accept=".csv,.tsv,.txt,.xlsx,.xls,.pdf"
             onChange={handleChange}
             style={{ display: 'none' }}
           />
@@ -436,15 +419,9 @@ export function DatasetUploader({
             Drop your dataset here, or <span style={{ color: activeMode === 'local' ? '#34d399' : '#38bdf8' }}>browse</span>
           </div>
 
-          {activeMode === 'local' ? (
-            <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1.5rem' }}>
-              Supported in Local Mode: <span className="mono" style={{ color: '#94a3b8' }}>.CSV, .TSV, .TXT</span> • Max size: <span className="mono" style={{ color: '#94a3b8' }}>50 MB</span> (Excel &amp; PDF supported in Online Mode)
-            </p>
-          ) : (
-            <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1.5rem' }}>
-              Supported formats: <span className="mono" style={{ color: '#94a3b8' }}>.CSV, .TSV, .XLSX, .XLS, .PDF, .TXT</span> • Max size: <span className="mono" style={{ color: '#94a3b8' }}>50 MB</span> (Excel <span className="mono" style={{ color: '#94a3b8' }}>25 MB</span>, PDF <span className="mono" style={{ color: '#94a3b8' }}>15 MB</span>)
-            </p>
-          )}
+          <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1.5rem' }}>
+            Supported formats: <span className="mono" style={{ color: '#94a3b8' }}>.CSV, .TSV, .XLSX, .XLS, .PDF, .TXT</span> • Max size: <span className="mono" style={{ color: '#94a3b8' }}>50 MB</span> (Excel <span className="mono" style={{ color: '#94a3b8' }}>25 MB</span>, PDF <span className="mono" style={{ color: '#94a3b8' }}>15 MB</span>)
+          </p>
 
           <div
             style={{
@@ -763,7 +740,7 @@ export function DatasetUploader({
               LOCAL MODE (IN-BROWSER WORKER)
             </div>
             <p style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5, margin: 0 }}>
-              Runs the full 6-module forensic engine directly inside a browser Web Worker (.CSV/.TSV/.TXT up to 50 MB). Your dataset never leaves this device.
+              Runs the full 6-module forensic engine directly inside a browser Web Worker for CSV, TSV, TXT, Excel (.xlsx/.xls), and PDF tables. Your dataset never leaves this device.
             </p>
           </div>
         </div>
