@@ -114,56 +114,61 @@ For a full breakdown of inputs, thresholds, finding IDs, evidence structures, an
 
 ## Architecture
 
-INTEGRIS exposes a single deterministic forensic engine through two execution modes:
+INTEGRIS exposes a deterministic forensic engine across three execution paths sharing the same `ForensicDossier` data contract:
 
 ```text
-Browser (Analyst)                             Local Terminal (Analyst)
-  │                                             │
-  ▼  HTTPS                                      ▼  Local File Path
-Vercel Frontend (React 19 / TS / Vite)        Offline CLI Runner (backend/app/offline/)
-https://integris-ten.vercel.app               python -m app.offline investigate <file>
-  │                                             │
-  ▼  HTTPS (POST /api/v1/investigate)           │  Zero Network Transit
-Render Backend API (FastAPI / Python)           │
-https://integris-sp5o.onrender.com/api/v1       │
-  │                                             │
-  └──────────────────────┬──────────────────────┘
-                         ▼  In-Memory Execution (Zero Database / Zero Disk Retention)
-        INTEGRIS Ingestion & Forensic Engine (backend/app/ingestion/ + backend/app/engine/)
+Browser (Analyst — https://integris-ten.vercel.app)
+  │
+  ├──► [ ONLINE MODE ] ──► HTTPS (POST /api/v1/investigate)
+  │                          │
+  │                          ▼
+  │                        Render Backend API (FastAPI / Python)
+  │                        (backend/app/ingestion/ + backend/app/engine/)
+  │
+  └──► [ LOCAL MODE ]  ──► Zero Network Transit (Transferable ArrayBuffer)
+                             │
+                             ▼
+                           Browser Web Worker (frontend/src/local/)
+                           (Columnar CSV/TSV/TXT Parser + 6 Forensic Analyzers)
+
+Local Terminal (Analyst)
+  └──► [ PYTHON CLI ]  ──► python -m app.offline investigate <file>
+                             │
+                             ▼
+                           Python Forensic Engine (backend/app/engine/)
 ```
 
-- **Active Production Deployment (Online Mode):** Vercel hosts the static React frontend (`https://integris-ten.vercel.app`) and Render hosts the FastAPI backend container (`https://integris-sp5o.onrender.com`).
-- **Offline Investigation Mode (Local Runner):** Runs the exact same Python ingestion and forensic pipeline directly on the user's machine (`python -m app.offline investigate ...`) without sending datasets to Render.
+- **Online Mode (Default Web API):** Vercel hosts the React frontend (`https://integris-ten.vercel.app`) and Render hosts the FastAPI backend container (`https://integris-sp5o.onrender.com`) supporting `.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, and `.pdf`.
+- **Browser-Local Mode (`LOCAL` in Web UI):** Executes the full 6-module forensic pipeline directly inside an isolated browser Web Worker (`frontend/src/local/worker/forensicWorker.ts`) for `.csv`, `.tsv`, and `.txt` datasets up to `50 MB` (including the `45 MB` stress dataset) with zero server uploads.
+- **Python CLI Offline Mode (`backend/app/offline/`):** Runs the Python ingestion and forensic pipeline directly from a local terminal (`python -m app.offline investigate ...`) without network transit.
 - **Note on Cloud Infrastructure:** Google Cloud Run is **not** part of the current production deployment.
 - See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/OFFLINE_MODE.md`](docs/OFFLINE_MODE.md) for component responsibilities, data contracts, and sequence flows.
 
 ---
 
-## Offline Investigation
+## Local & Offline Investigation
 
-**Offline Investigation Mode runs the INTEGRIS forensic engine locally on the user's machine.**
+### 1. Browser-Local Mode (In-Browser Web Worker on Vercel)
 
-- **What It Is & Why It Exists:** A thin local CLI and Python execution adapter (`backend/app/offline/`) around the existing `backend/app/engine/` pipeline. It enables analysts to audit sensitive datasets or large local files (up to `50 MB`, such as the `45 MB` local stress dataset) without uploading data over the network or relying on free-tier cloud container memory/timeouts.
-- **How It Differs from Online Mode:** Online Mode uploads the dataset from the browser to the deployed Render API (`POST /api/v1/investigate`) for volatile in-memory analysis. Offline Mode executes the identical `ingest_dataset()` and `run_forensic_pipeline()` functions directly inside a local Python process; the dataset never leaves the machine.
-- **Prerequisites & Setup:** Requires Python `3.10+` and the dependencies in `backend/requirements.txt`:
-  ```bash
-  cd backend
-  python -m venv .venv
-  .venv\Scripts\Activate.ps1   # macOS/Linux: source .venv/bin/activate
-  pip install -r requirements.txt
-  ```
-- **Example Commands:**
-  ```bash
-  # Print ForensicDossier JSON to stdout:
-  python -m app.offline investigate ../datasets/clean_baseline.csv
+**Browser-Local Mode runs the complete INTEGRIS forensic investigation directly inside the user's browser without uploading the dataset to Render or any external API.**
 
-  # Run with an optional ML target column and write JSON report to disk:
-  python -m app.offline investigate ../datasets/corrupted_forensic.csv --target-column attrition --output ../dossier.json
-  ```
-- **Supported Formats:** `.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, and machine-readable tabular `.pdf` (validated via the shared `backend/app/ingestion/` parsers and magic-byte checks).
-- **Output:** Emits the exact `ForensicDossier` JSON structure (`metadata`, `summary`, `trust_score`, `findings`, `columns`, `recommendations`) sanitized via `sanitize_for_json()`, matching the online API output for the same input file.
-- **Privacy Behavior:** Processes the dataset strictly in local RAM, never contacts Render or external APIs, requires no database or AI service, emits no telemetry, and refuses to overwrite the input dataset file.
-- **Limitations:** Offline Mode requires a local Python environment (opening the Vercel web UI alone does not run the Python engine in the browser) and enforces the same engine format/dimension bounds (`50 MB` CSV/TSV/TXT, `25 MB` Excel, `15 MB` PDF, `500,000` rows, `1,000` columns). See [`docs/OFFLINE_MODE.md`](docs/OFFLINE_MODE.md) for full documentation.
+- **How to Use:** Open [https://integris-ten.vercel.app](https://integris-ten.vercel.app), toggle the execution mode selector to **`LOCAL`**, select a `.csv`, `.tsv`, or `.txt` file (up to `50 MB`), optionally choose a target column, and click **Run Local Investigation**.
+- **Architecture & Memory Discipline:** The file's `ArrayBuffer` is transferred with zero copy into a dedicated Web Worker (`frontend/src/local/`). A 2-pass byte-streaming RFC 4180 parser constructs compact columnar typed arrays (`Float64Array` for numeric/boolean columns and dictionary-encoded `Int32Array` for string columns) and executes exact ports of all 6 Python forensic modules (`completeness`, `uniqueness`, `validity`, `distribution`, `consistency`, `leakage`) plus `profiler` and `scorer`.
+- **Parity & 45 MB Stress Performance:** Verified for 100% output parity (`overall_score`, `verdict`, `grade`, `penalties`, `findings`, `columns`, `recommendations`) against the Python reference engine across all benchmark datasets and the `45.6 MB` stress dataset (`156,310 × 26`, processed in `~2.7s`).
+- **Privacy Guarantee:** Zero network requests are made during local investigation (`LOCAL PROCESSING — Your file stays in this browser.` / `Processed locally — no server upload.`).
+- **Format Scope:** Supports `.csv`, `.tsv`, and `.txt` up to `50 MB`. Binary `.xlsx`, `.xls`, and `.pdf` files are rejected in Browser-Local Mode with guidance to export to `.csv` or switch to Online Mode.
+
+### 2. Python CLI Offline Mode (`backend/app/offline/`)
+
+For local terminal automation or multi-format offline files (`.xlsx`, `.xls`, `.pdf`), INTEGRIS also provides a Python CLI wrapper around `backend/app/engine/`:
+
+```bash
+cd backend
+python -m app.offline investigate ../datasets/clean_baseline.csv
+python -m app.offline investigate ../datasets/corrupted_forensic.csv --target-column attrition --output ../dossier.json
+```
+
+See [`docs/OFFLINE_MODE.md`](docs/OFFLINE_MODE.md) for full documentation of both Browser-Local Mode and the Python CLI runner.
 
 ---
 
@@ -186,10 +191,10 @@ These controls provide defense-in-depth for an unauthenticated public analysis A
 All automated test suites and build checks pass on the current repository state:
 
 - **Backend Test Suite (`pytest`):** `123 passed, 0 failed, 0 skipped` (`111` baseline + `12` offline mode & parity tests)
-- **Frontend Test Suite (`node --test`):** `7 passed, 0 failed, 0 skipped`
+- **Frontend Test Suite (`node --test`):** `13 passed, 0 failed, 0 skipped` (`7` report/UI tests + `6` browser-local engine parity & 45 MB stress tests)
 - **Frontend Production Build (`tsc -b && vite build`):** `passed` (`0` TypeScript or bundler errors)
 
-Testing spans unit tests for every forensic analyzer, multi-format ingestion tests (`.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, `.pdf`), non-finite float (`NaN`/`Inf`) JSON serialization tests, CORS and filename-sanitization regression tests, frontend report-generation and accessibility contract tests, and Phase 7/8/9 validation passes. See [`docs/VALIDATION.md`](docs/VALIDATION.md) for details.
+Testing spans unit tests for every forensic analyzer, multi-format ingestion tests (`.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, `.pdf`), browser-local engine parity tests against the Python reference engine (including the `45 MB` stress dataset), non-finite float (`NaN`/`Inf`) JSON serialization tests, CORS and filename-sanitization regression tests, frontend report-generation and accessibility contract tests, and Phase 7/8/9 validation passes. See [`docs/VALIDATION.md`](docs/VALIDATION.md) for details.
 
 ---
 

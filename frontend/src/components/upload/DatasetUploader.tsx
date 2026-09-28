@@ -8,13 +8,23 @@ import {
   Target,
   AlertCircle,
   FileCheck,
-  Terminal,
+  Cpu,
+  Globe,
+  ShieldCheck,
 } from 'lucide-react';
 
+export type InvestigationExecutionMode = 'online' | 'local';
+
 interface DatasetUploaderProps {
-  onStartInvestigation: (file: File, targetColumn?: string) => void;
+  onStartInvestigation: (
+    file: File,
+    targetColumn?: string,
+    mode?: InvestigationExecutionMode
+  ) => void;
   isLoading: boolean;
   serverError: string | null;
+  executionMode?: InvestigationExecutionMode;
+  onExecutionModeChange?: (mode: InvestigationExecutionMode) => void;
 }
 
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
@@ -31,7 +41,32 @@ export function DatasetUploader({
   onStartInvestigation,
   isLoading,
   serverError,
+  executionMode = 'online',
+  onExecutionModeChange,
 }: DatasetUploaderProps) {
+  const [internalMode, setInternalMode] =
+    useState<InvestigationExecutionMode>(executionMode);
+  const activeMode = onExecutionModeChange ? executionMode : internalMode;
+
+  const handleModeSelect = (nextMode: InvestigationExecutionMode) => {
+    setLocalError(null);
+    if (onExecutionModeChange) {
+      onExecutionModeChange(nextMode);
+    } else {
+      setInternalMode(nextMode);
+    }
+    if (selectedFile && nextMode === 'local') {
+      const ext = selectedFile.name
+        .slice(selectedFile.name.lastIndexOf('.'))
+        .toLowerCase();
+      if (!['.csv', '.tsv', '.txt'].includes(ext)) {
+        setLocalError(
+          `Local Browser Mode supports .csv, .tsv, and .txt datasets. '${selectedFile.name}' (${ext}) requires binary document extraction — please export to CSV or switch to Online Mode.`
+        );
+      }
+    }
+  };
+
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -45,16 +80,28 @@ export function DatasetUploader({
     setLocalError(null);
 
     // Validate extension
-    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+    const dotIdx = file.name.lastIndexOf('.');
+    const ext = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : '';
     if (!['.csv', '.tsv', '.txt', '.xlsx', '.xls', '.pdf'].includes(ext)) {
-      setLocalError(`Unsupported file format '${ext}'. Please provide a .csv, .xlsx, .xls, .pdf, or .txt file.`);
+      setLocalError(
+        `Unsupported file format '${ext || 'unknown'}'. Please provide a .csv, .tsv, .txt, .xlsx, .xls, or .pdf file.`
+      );
+      return;
+    }
+
+    if (activeMode === 'local' && !['.csv', '.tsv', '.txt'].includes(ext)) {
+      setLocalError(
+        `Local Browser Mode supports .csv, .tsv, and .txt datasets. '${file.name}' (${ext}) requires binary document extraction — please export the table to CSV or switch to Online Mode.`
+      );
       return;
     }
 
     // Validate size per format
     const limitBytes = FORMAT_LIMITS[ext] || MAX_FILE_SIZE_BYTES;
     if (file.size > limitBytes) {
-      setLocalError(`File size (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds the ${(limitBytes / (1024 * 1024)).toFixed(0)} MB limit for ${ext.toUpperCase()}.`);
+      setLocalError(
+        `File size (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds the ${(limitBytes / (1024 * 1024)).toFixed(0)} MB limit for ${ext.toUpperCase()}.`
+      );
       return;
     }
 
@@ -68,7 +115,9 @@ export function DatasetUploader({
 
     // Handle binary formats without text reading
     if (ext === '.xlsx' || ext === '.xls') {
-      setDetectedFormat(ext === '.xlsx' ? 'Excel Spreadsheet (.xlsx)' : 'Legacy Excel (.xls)');
+      setDetectedFormat(
+        ext === '.xlsx' ? 'Excel Spreadsheet (.xlsx)' : 'Legacy Excel (.xls)'
+      );
       setHeaders([]);
       setEstimatedRows(null);
       return;
@@ -150,7 +199,7 @@ export function DatasetUploader({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFile) return;
-    onStartInvestigation(selectedFile, targetColumn || undefined);
+    onStartInvestigation(selectedFile, targetColumn || undefined, activeMode);
   };
 
   const formatFileSize = (bytes: number): string => {
@@ -162,7 +211,7 @@ export function DatasetUploader({
   return (
     <div style={{ maxWidth: '820px', margin: '0 auto', padding: '1.5rem 1rem 3rem' }}>
       {/* Hero Headline */}
-      <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
+      <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
         <h1
           style={{
             fontSize: '2.5rem',
@@ -196,6 +245,111 @@ export function DatasetUploader({
           INTEGRIS investigates whether a dataset can reasonably be trusted before it is used for
           analytics, reporting, or machine learning models.
         </p>
+      </div>
+
+      {/* Execution Mode Selector */}
+      <div
+        style={{
+          marginBottom: '1.25rem',
+          padding: '1rem 1.25rem',
+          borderRadius: '12px',
+          backgroundColor: '#0a0f18',
+          border: `1px solid ${activeMode === 'local' ? 'rgba(16, 185, 129, 0.35)' : '#1e293b'}`,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.75rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {activeMode === 'local' ? (
+              <ShieldCheck size={17} color="#10b981" />
+            ) : (
+              <Globe size={17} color="#38bdf8" />
+            )}
+            <span
+              className="mono"
+              style={{
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                color: activeMode === 'local' ? '#34d399' : '#38bdf8',
+                letterSpacing: '0.02em',
+              }}
+            >
+              {activeMode === 'local'
+                ? 'LOCAL PROCESSING — Your file stays in this browser.'
+                : 'ONLINE PROCESSING — Dataset will be sent to the INTEGRIS API.'}
+            </span>
+          </div>
+
+          <div
+            role="group"
+            aria-label="Investigation execution mode"
+            style={{
+              display: 'inline-flex',
+              backgroundColor: '#060911',
+              padding: '4px',
+              borderRadius: '8px',
+              border: '1px solid #1e293b',
+              gap: '4px',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => handleModeSelect('online')}
+              disabled={isLoading}
+              aria-pressed={activeMode === 'online'}
+              className="mono"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                border: activeMode === 'online' ? '1px solid rgba(56, 189, 248, 0.45)' : '1px solid transparent',
+                backgroundColor: activeMode === 'online' ? 'rgba(2, 132, 199, 0.22)' : 'transparent',
+                color: activeMode === 'online' ? '#38bdf8' : '#64748b',
+                cursor: isLoading ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Globe size={13} />
+              <span>ONLINE</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleModeSelect('local')}
+              disabled={isLoading}
+              aria-pressed={activeMode === 'local'}
+              className="mono"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                border: activeMode === 'local' ? '1px solid rgba(16, 185, 129, 0.45)' : '1px solid transparent',
+                backgroundColor: activeMode === 'local' ? 'rgba(16, 185, 129, 0.18)' : 'transparent',
+                color: activeMode === 'local' ? '#34d399' : '#64748b',
+                cursor: isLoading ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Cpu size={13} />
+              <span>LOCAL</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Error alert if any */}
@@ -256,7 +410,7 @@ export function DatasetUploader({
           <input
             ref={inputRef}
             type="file"
-            accept=".csv,.tsv,.txt,.xlsx,.xls,.pdf"
+            accept={activeMode === 'local' ? '.csv,.tsv,.txt' : '.csv,.tsv,.txt,.xlsx,.xls,.pdf'}
             onChange={handleChange}
             style={{ display: 'none' }}
           />
@@ -272,19 +426,25 @@ export function DatasetUploader({
               alignItems: 'center',
               justifyContent: 'center',
               margin: '0 auto 1.25rem',
-              color: '#38bdf8',
+              color: activeMode === 'local' ? '#34d399' : '#38bdf8',
             }}
           >
             <UploadCloud size={30} strokeWidth={2} />
           </div>
 
           <div style={{ fontSize: '1.1rem', fontWeight: 600, color: '#f1f5f9', marginBottom: '0.35rem' }}>
-            Drop your dataset here, or <span style={{ color: '#38bdf8' }}>browse</span>
+            Drop your dataset here, or <span style={{ color: activeMode === 'local' ? '#34d399' : '#38bdf8' }}>browse</span>
           </div>
 
-          <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1.5rem' }}>
-            Supported formats: <span className="mono" style={{ color: '#94a3b8' }}>.CSV, .TSV, .XLSX, .XLS, .PDF, .TXT</span> • Max size: <span className="mono" style={{ color: '#94a3b8' }}>50 MB</span> (Excel <span className="mono" style={{ color: '#94a3b8' }}>25 MB</span>, PDF <span className="mono" style={{ color: '#94a3b8' }}>15 MB</span>)
-          </p>
+          {activeMode === 'local' ? (
+            <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1.5rem' }}>
+              Supported in Local Mode: <span className="mono" style={{ color: '#94a3b8' }}>.CSV, .TSV, .TXT</span> • Max size: <span className="mono" style={{ color: '#94a3b8' }}>50 MB</span> (Excel &amp; PDF supported in Online Mode)
+            </p>
+          ) : (
+            <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1.5rem' }}>
+              Supported formats: <span className="mono" style={{ color: '#94a3b8' }}>.CSV, .TSV, .XLSX, .XLS, .PDF, .TXT</span> • Max size: <span className="mono" style={{ color: '#94a3b8' }}>50 MB</span> (Excel <span className="mono" style={{ color: '#94a3b8' }}>25 MB</span>, PDF <span className="mono" style={{ color: '#94a3b8' }}>15 MB</span>)
+            </p>
+          )}
 
           <div
             style={{
@@ -300,7 +460,11 @@ export function DatasetUploader({
             }}
           >
             <Lock size={13} color="#10b981" />
-            <span>Zero-Retention: Dataset is processed in volatile memory and never stored</span>
+            <span>
+              {activeMode === 'local'
+                ? 'Browser-Local Worker: Dataset is analyzed strictly inside your browser with zero network calls'
+                : 'Zero-Retention: Dataset is processed in volatile memory and never stored'}
+            </span>
           </div>
         </div>
       ) : (
@@ -513,16 +677,19 @@ export function DatasetUploader({
                   gap: '8px',
                   padding: '10px 22px',
                   borderRadius: '8px',
-                  backgroundColor: '#0284c7',
+                  backgroundColor: activeMode === 'local' ? '#059669' : '#0284c7',
                   border: 'none',
                   color: '#ffffff',
                   fontSize: '0.9rem',
                   fontWeight: 600,
                   cursor: isLoading ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 0 15px rgba(2, 132, 199, 0.3)',
+                  boxShadow:
+                    activeMode === 'local'
+                      ? '0 0 15px rgba(5, 150, 105, 0.35)'
+                      : '0 0 15px rgba(2, 132, 199, 0.3)',
                 }}
               >
-                <span>Run Investigation</span>
+                <span>{activeMode === 'local' ? 'Run Local Investigation' : 'Run Investigation'}</span>
                 <ArrowRight size={16} />
               </button>
             </div>
@@ -530,7 +697,7 @@ export function DatasetUploader({
         </div>
       )}
 
-      {/* Execution Mode Guidance: Online vs. Offline */}
+      {/* Execution Mode Guidance: Online vs. Browser-Local */}
       <div
         style={{
           marginTop: '1.5rem',
@@ -551,7 +718,7 @@ export function DatasetUploader({
             marginBottom: '0.75rem',
           }}
         >
-          <Terminal size={16} color="#38bdf8" />
+          <Cpu size={16} color="#38bdf8" />
           <span>Investigation Execution Modes</span>
         </div>
 
@@ -560,55 +727,45 @@ export function DatasetUploader({
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
             gap: '1rem',
-            marginBottom: '0.85rem',
           }}
         >
           <div
+            onClick={() => handleModeSelect('online')}
             style={{
               padding: '0.75rem 0.9rem',
               borderRadius: '8px',
-              backgroundColor: '#0d1422',
-              border: '1px solid #1e293b',
+              backgroundColor: activeMode === 'online' ? 'rgba(2, 132, 199, 0.08)' : '#0d1422',
+              border: `1px solid ${activeMode === 'online' ? 'rgba(56, 189, 248, 0.45)' : '#1e293b'}`,
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              transition: 'all 0.15s ease',
             }}
           >
             <div className="mono" style={{ fontSize: '0.72rem', fontWeight: 700, color: '#38bdf8', marginBottom: '4px' }}>
-              ONLINE MODE (WEB DEFAULT)
+              ONLINE MODE (INTEGRIS API)
             </div>
             <p style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5, margin: 0 }}>
-              Uses the deployed INTEGRIS API. Uploaded datasets are analyzed in volatile memory and never persisted.
+              Uses the deployed INTEGRIS API for CSV, TSV, TXT, Excel (.xlsx/.xls), and PDF tables. Analyzed in volatile memory and never persisted.
             </p>
           </div>
 
           <div
+            onClick={() => handleModeSelect('local')}
             style={{
               padding: '0.75rem 0.9rem',
               borderRadius: '8px',
-              backgroundColor: '#0d1422',
-              border: '1px solid #1e293b',
+              backgroundColor: activeMode === 'local' ? 'rgba(16, 185, 129, 0.08)' : '#0d1422',
+              border: `1px solid ${activeMode === 'local' ? 'rgba(16, 185, 129, 0.45)' : '#1e293b'}`,
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              transition: 'all 0.15s ease',
             }}
           >
             <div className="mono" style={{ fontSize: '0.72rem', fontWeight: 700, color: '#34d399', marginBottom: '4px' }}>
-              OFFLINE MODE (LOCAL CLI)
+              LOCAL MODE (IN-BROWSER WORKER)
             </div>
             <p style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5, margin: 0 }}>
-              Runs the forensic engine locally on your machine. Dataset stays on this machine and is never sent to Render.
+              Runs the full 6-module forensic engine directly inside a browser Web Worker (.CSV/.TSV/.TXT up to 50 MB). Your dataset never leaves this device.
             </p>
           </div>
-        </div>
-
-        <div
-          className="mono"
-          style={{
-            padding: '0.65rem 0.85rem',
-            borderRadius: '6px',
-            backgroundColor: '#070a10',
-            border: '1px solid #172030',
-            fontSize: '0.75rem',
-            color: '#cbd5e1',
-            overflowX: 'auto',
-          }}
-        >
-          cd backend &amp;&amp; python -m app.offline investigate ../datasets/clean_baseline.csv --output dossier.json
         </div>
       </div>
 

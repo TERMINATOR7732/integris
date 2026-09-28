@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X, ShieldAlert, BarChart3, Columns, Scale } from 'lucide-react';
 import { getHealth, investigateDataset, IntegrisApiError } from './services/api';
+import { runBrowserLocalInvestigation, type LocalProgressUpdate } from './local';
 import type { HealthResponse, ForensicDossier, Finding } from './types/integris';
 import { Header } from './components/common/Header';
-import { DatasetUploader } from './components/upload/DatasetUploader';
+import { DatasetUploader, type InvestigationExecutionMode } from './components/upload/DatasetUploader';
 import { InvestigationLoading } from './components/investigation/InvestigationLoading';
 import { CaseHeader } from './components/investigation/CaseHeader';
 import { ExecutiveVerdictCard } from './components/investigation/ExecutiveVerdictCard';
@@ -22,6 +23,12 @@ export default function App() {
   const [activeView, setActiveView] = useState<'upload' | 'results'>('upload');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string | null>(null);
+
+  // Execution mode state ('online' | 'local')
+  const [executionMode, setExecutionMode] = useState<InvestigationExecutionMode>('online');
+  const [dossierExecutionMode, setDossierExecutionMode] = useState<InvestigationExecutionMode>('online');
+  const [localProgress, setLocalProgress] = useState<LocalProgressUpdate | null>(null);
+  const localAbortRef = useRef<AbortController | null>(null);
 
   // Active investigation state
   const [activeFile, setActiveFile] = useState<File | null>(null);
@@ -60,15 +67,65 @@ export default function App() {
     };
   }, []);
 
-  const handleStartInvestigation = async (file: File, targetColumn?: string) => {
+  const handleCancelLocalInvestigation = () => {
+    if (localAbortRef.current) {
+      localAbortRef.current.abort();
+      localAbortRef.current = null;
+    }
+    setIsLoading(false);
+    setLocalProgress(null);
+  };
+
+  const handleStartInvestigation = async (
+    file: File,
+    targetColumn?: string,
+    mode?: InvestigationExecutionMode
+  ) => {
+    const resolvedMode: InvestigationExecutionMode = mode ?? executionMode;
+    setExecutionMode(resolvedMode);
     setIsLoading(true);
     setServerError(null);
     setActiveFile(file);
     setActiveTargetColumn(targetColumn);
+    setLocalProgress(null);
+
+    if (resolvedMode === 'local') {
+      const controller = new AbortController();
+      localAbortRef.current = controller;
+      try {
+        const result = await runBrowserLocalInvestigation({
+          file,
+          targetColumn,
+          signal: controller.signal,
+          onProgress: (update: LocalProgressUpdate) => setLocalProgress(update),
+        });
+        setDossier(result);
+        setDossierExecutionMode('local');
+        setActiveView('results');
+        setActiveTab('findings');
+        setSelectedFinding(null);
+        setHighlightedColumn(null);
+      } catch (err: unknown) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        if (err instanceof Error) {
+          setServerError(err.message);
+        } else {
+          setServerError('An unexpected error occurred during local browser investigation.');
+        }
+      } finally {
+        localAbortRef.current = null;
+        setIsLoading(false);
+        setLocalProgress(null);
+      }
+      return;
+    }
 
     try {
       const result = await investigateDataset(file, { targetColumn });
       setDossier(result);
+      setDossierExecutionMode('online');
       setActiveView('results');
       setActiveTab('findings');
       setSelectedFinding(null);
@@ -87,6 +144,10 @@ export default function App() {
   };
 
   const handleNewInvestigation = () => {
+    if (localAbortRef.current) {
+      localAbortRef.current.abort();
+      localAbortRef.current = null;
+    }
     setActiveView('upload');
     setSelectedFinding(null);
     setIsReportPreviewOpen(false);
@@ -159,12 +220,23 @@ export default function App() {
         {activeView === 'upload' && (
           <div>
             {isLoading && activeFile ? (
-              <InvestigationLoading fileName={activeFile.name} fileSize={activeFile.size} />
+              <InvestigationLoading
+                fileName={activeFile.name}
+                fileSize={activeFile.size}
+                executionMode={executionMode}
+                localProgress={localProgress}
+                onCancel={executionMode === 'local' ? handleCancelLocalInvestigation : undefined}
+              />
             ) : (
               <DatasetUploader
                 onStartInvestigation={handleStartInvestigation}
                 isLoading={isLoading}
                 serverError={serverError}
+                executionMode={executionMode}
+                onExecutionModeChange={(mode) => {
+                  setExecutionMode(mode);
+                  setServerError(null);
+                }}
               />
             )}
           </div>
@@ -177,6 +249,7 @@ export default function App() {
             <CaseHeader
               metadata={dossier.metadata}
               targetColumn={activeTargetColumn}
+              executionMode={dossierExecutionMode}
               onNewInvestigation={handleNewInvestigation}
               onGenerateReport={() => setIsReportPreviewOpen(true)}
             />

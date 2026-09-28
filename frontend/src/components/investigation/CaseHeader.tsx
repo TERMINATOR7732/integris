@@ -1,14 +1,21 @@
-import { FileText, Clock, Cpu, ArrowLeft, Target, HardDrive } from 'lucide-react';
+import { FileText, Clock, Cpu, ArrowLeft, Target, HardDrive, ShieldCheck } from 'lucide-react';
 import type { InvestigationMetadata } from '../../types/integris';
 
 interface CaseHeaderProps {
   metadata: InvestigationMetadata;
   targetColumn?: string;
+  executionMode?: 'online' | 'local';
   onNewInvestigation: () => void;
   onGenerateReport?: () => void;
 }
 
-export function CaseHeader({ metadata, targetColumn, onNewInvestigation, onGenerateReport }: CaseHeaderProps) {
+export function CaseHeader({
+  metadata,
+  targetColumn,
+  executionMode = 'online',
+  onNewInvestigation,
+  onGenerateReport,
+}: CaseHeaderProps) {
   const formatBytes = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -52,7 +59,7 @@ export function CaseHeader({ metadata, targetColumn, onNewInvestigation, onGener
       >
         {/* Left: Case Identity */}
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
             <span
               className="mono"
               style={{
@@ -70,6 +77,26 @@ export function CaseHeader({ metadata, targetColumn, onNewInvestigation, onGener
             <span className="mono" style={{ fontSize: '0.75rem', color: '#64748b' }}>
               Engine v{metadata.engine_version}
             </span>
+            {executionMode === 'local' && (
+              <span
+                className="mono"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  color: '#34d399',
+                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                  border: '1px solid rgba(16, 185, 129, 0.35)',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                }}
+              >
+                <ShieldCheck size={12} color="#34d399" />
+                <span>Processed locally — no server upload.</span>
+              </span>
+            )}
           </div>
 
           <h1

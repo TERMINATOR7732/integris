@@ -277,7 +277,7 @@ test('Phase 9 UX & accessibility contracts are enforced across components', asyn
   );
 });
 
-test('Offline Investigation Mode guidance clearly distinguishes Online API vs Local CLI execution', async () => {
+test('Browser-Local Investigation Mode UI clearly distinguishes Online API vs Local Browser Worker execution', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');
   const { fileURLToPath } = await import('node:url');
@@ -287,11 +287,21 @@ test('Offline Investigation Mode guidance clearly distinguishes Online API vs Lo
     path.join(__dirname, '../components/upload/DatasetUploader.tsx'),
     'utf-8'
   );
+  const caseHeaderSrc = fs.readFileSync(
+    path.join(__dirname, '../components/investigation/CaseHeader.tsx'),
+    'utf-8'
+  );
+  const loadingSrc = fs.readFileSync(
+    path.join(__dirname, '../components/investigation/InvestigationLoading.tsx'),
+    'utf-8'
+  );
+  const appSrc = fs.readFileSync(path.join(__dirname, '../App.tsx'), 'utf-8');
 
+  assert.ok(uploaderSrc.includes('ONLINE PROCESSING — Dataset will be sent to the INTEGRIS API.'));
+  assert.ok(uploaderSrc.includes('LOCAL PROCESSING — Your file stays in this browser.'));
   assert.ok(uploaderSrc.includes('ONLINE MODE'));
-  assert.ok(uploaderSrc.includes('Uses the deployed INTEGRIS API'));
-  assert.ok(uploaderSrc.includes('OFFLINE MODE'));
-  assert.ok(uploaderSrc.includes('Runs the forensic engine locally on your machine'));
-  assert.ok(uploaderSrc.includes('python -m app.offline investigate'));
-  assert.ok(!uploaderSrc.toLowerCase().includes('works offline in the browser'));
+  assert.ok(uploaderSrc.includes('LOCAL MODE'));
+  assert.ok(caseHeaderSrc.includes('Processed locally — no server upload.'));
+  assert.ok(loadingSrc.includes('Browser-Local Forensic Analysis In Progress'));
+  assert.ok(appSrc.includes('runBrowserLocalInvestigation'));
 });

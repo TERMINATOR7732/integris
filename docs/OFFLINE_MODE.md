@@ -1,42 +1,49 @@
-# INTEGRIS — Offline Investigation Mode
+# INTEGRIS — Browser-Local & Offline Investigation Modes
 
-Offline Investigation Mode runs the INTEGRIS forensic engine locally on the user's machine. It allows analysts and engineers to investigate datasets using the existing Python forensic pipeline (`backend/app/engine/`) without uploading dataset files to Render or any remote API.
+INTEGRIS provides two ways to run forensic investigations locally without uploading datasets to Render or any remote API:
+
+1. **Browser-Local Mode (`LOCAL` in the Vercel Web UI):** Runs the complete 6-module forensic engine directly inside an isolated browser Web Worker (`frontend/src/local/`) on `.csv`, `.tsv`, and `.txt` files up to `50 MB` (including `45 MB` stress datasets).
+2. **Python CLI Offline Mode (`backend/app/offline/`):** Runs the Python ingestion and forensic pipeline (`backend/app/engine/`) directly from a local terminal across `.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, and `.pdf` files.
 
 ---
 
 ## 1. Architecture
 
-INTEGRIS supports two execution paths over a single shared forensic engine:
-
 ```text
-                INTEGRIS
-                   │
-          Investigation Mode
-             /           \
-            /             \
-      ONLINE               OFFLINE
-         │                    │
-    Render API          Local CLI Runner
-(app/api/routes.py)   (app/offline/runner.py)
-         │                    │
-         └─────────┬──────────┘
-                   ▼
-        Shared Ingestion Layer
-         (backend/app/ingestion/)
-                   │
-                   ▼
-        SAME FORENSIC ENGINE
-         (backend/app/engine/)
+                             INTEGRIS
+                                │
+                 ┌──────────────┼──────────────┐
+                 ▼              ▼              ▼
+          ONLINE (Web)    LOCAL (Browser)   OFFLINE (CLI)
+                 │              │              │
+            Render API     Web Worker     Local CLI Runner
+        (app/api/routes) (src/local/*)  (app/offline/runner)
+                 │              │              │
+                 ▼              ▼              ▼
+             ForensicDossier JSON Contract (Identical Parity)
 ```
 
-- **Single Source of Truth:** `backend/app/engine/` (`profiler.py`, `completeness.py`, `uniqueness.py`, `validity.py`, `distribution.py`, `consistency.py`, `leakage.py`, `scorer.py`, `pipeline.py`, `sanitizer.py`) and `backend/app/ingestion/` remain untouched and un-duplicated.
-- **Thin Local Adapter (`backend/app/offline/`):**
-  - `runner.py`: Validates the local file path, checks format-specific byte limits (`settings.FORMAT_SIZE_LIMITS_BYTES`), invokes `ingest_dataset()`, enforces row/column limits (`500,000` rows, `1,000` columns), validates the optional `target_column`, executes `run_forensic_pipeline()`, and serializes the resulting `ForensicDossier` via `sanitize_for_json()`.
-  - `cli.py` / `__main__.py`: Provides the command-line interface (`python -m app.offline investigate ...`), handles output file generation (`--output`), prevents accidental overwriting of the input file, and emits controlled error messages with non-zero exit codes on failure.
+- **Browser-Local Engine (`frontend/src/local/`):**
+  - `ingestion/detector.ts` & `ingestion/csvParser.ts`: Validates magic bytes (`%PDF-`, `PK\x03\x04`, OLE2, null bytes), auto-detects delimiters and text encodings (`UTF-8`, `CP1252`), and executes a 2-pass byte-streaming RFC 4180 parse into compact typed arrays (`Float64Array` for numeric/boolean columns and dictionary-encoded `Int32Array` for string columns).
+  - `engine/*`: Exact TypeScript ports of `profiler`, `completeness`, `uniqueness`, `validity`, `distribution`, `consistency`, `leakage`, `scorer`, `sanitizer`, and `pipeline`, verified for 100% output parity against the Python reference engine.
+  - `worker/forensicWorker.ts` & `index.ts`: Transfers the file's `ArrayBuffer` with zero copy into a dedicated Web Worker, streams stage progress updates (`0%` → `100%`), and supports instant `AbortSignal` cancellation (`worker.terminate()`).
+- **Python Reference Engine (`backend/app/engine/` & `backend/app/offline/`):**
+  - `backend/app/engine/` (`profiler.py`, `completeness.py`, `uniqueness.py`, `validity.py`, `distribution.py`, `consistency.py`, `leakage.py`, `scorer.py`, `pipeline.py`, `sanitizer.py`) and `backend/app/ingestion/` remain untouched and un-duplicated.
+  - `backend/app/offline/runner.py` & `cli.py`: Provides the command-line interface (`python -m app.offline investigate ...`).
 
 ---
 
-## 2. Installation
+## 2. Browser-Local Mode Usage (No Installation Required)
+
+1. Open [https://integris-ten.vercel.app](https://integris-ten.vercel.app) (or `http://localhost:5173` in local development).
+2. Select **`LOCAL`** in the Execution Mode toggle (`LOCAL PROCESSING — Your file stays in this browser.`).
+3. Drop or browse for a `.csv`, `.tsv`, or `.txt` dataset (up to `50 MB`).
+4. Optionally select a target column for ML leakage checks and click **Run Local Investigation**.
+5. Inspect the resulting Forensic Dossier (`Processed locally — no server upload.`) and export to Markdown, JSON, or Print/PDF.
+
+---
+
+## 3. Python CLI Installation & Setup
 
 ### Prerequisites
 
